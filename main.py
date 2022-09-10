@@ -469,3 +469,5 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             mixers.push(mixer_node{n_id});
                             """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'), duration=shape_data.sequences[seq_id].duration))
                     node_id += 1
+                    
+        return {'FINISHED'}
