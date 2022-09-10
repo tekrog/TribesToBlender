@@ -1,474 +1,471 @@
-from dts import Dts
+from .dts import Dts
 import sys
 import os
 import os.path
 import pprint
 
-def store(str=''):
-    print(str)
-    with open(out_path, 'a') as f:
-        f.write(str + "\n")
-
-def short2float(short):
-    if short == 0:
-        return 0
-    return float(short) / float(0x7FFF)
-
-def create_nodes(node: Dts.Node, nodes, transforms, node_tree):
-    store('var node_{} = new THREE.Group();'.format(node.id))
-
-    def_trans = transforms[nodes[node.id].default_transform]
-    if nodes[node.id].parent == -1:
-        store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-        store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-            node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-        ))
-        store('group.add(node_{});'.format(node.id))
-    else:
-        #store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
-        store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
-        store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
-        store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
-        store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
-        store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
-            node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-        ))
-        store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
-
-    for child in node_tree[node.id]:
-        create_nodes(nodes[child], nodes, transforms, node_tree)
-
-
-#file_path = "./shapes/anten_lrg.DTS"
-#file_path = "./shapes/radar.DTS"
-#file_path = "./shapes/sat_big.DTS"
-#file_path = "./shapes/larmor.dts"
-#file_path = "./shapes/larmor.DTS"
-#file_path = "./shapes/plasma.DTS"
-#file_path = "./shapes/tree1.DTS"
-#file_path = "./shapes/ammounit.DTS"
-#file_path = "./shapes/inventory_sta.DTS"
-#file_path = "./shapes/disc.DTS"
-file_path = "./shapes/indoorgun.DTS"
-
-out_path = "/var/www/html/dts/" + os.path.basename(file_path) + ".html"
-
-if os.path.exists(out_path):
-    os.truncate(out_path, 0)
-
-with open('header.html', 'r') as f:
-    with open(out_path, 'w') as g:
-        g.write(f.read())
-
-
-
-
-d = Dts.from_file(file_path)
-
-MAX_VAL = float(0x7FFF)
-names = []
-nodes = []
-objects = []
-textures = []
-transforms = []
-node_tree = {}
-
-store('var geometry = null;')
-store('var mesh = null;')
-store('var texture = null;')
-store('var material = null;')
-store('var textureVerts = null;')
-
-# Load textures
-if d.has_materials and d.materials:
-    i = 0
-    for param in d.materials.params:
-        bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
-        texture = None
-        if len(bitmap_name):
-            bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
-            bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
-            texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(bitmap_name.decode('ascii'))
-            store(texture)
-            store('texture_' + str(i) + '.flipY = false;')
-
-        store('const material_' + str(i) + ' = new THREE.MeshBasicMaterial({')
-        store('//color: 0x{}{}{},'.format(format(param.rgb.red, 'X'), format(param.rgb.green, 'X'), format(param.rgb.blue, 'X')))
-        if len(bitmap_name):
-            store('map: {},'.format('texture_' + str(i)))
-            store('transparent: true,')
-
-        store('});')
-        textures.append('material_' + str(i))
-        i += 1
-
-# Make nodes
-if b'TS::Shape' in d.shape.data.classname:
-    shape_data: Dts.TsShape = d.shape.data.obj_data
-
-    for name in shape_data.names:
-        names.append(name[:name.find(b'\0')])
-
-    if hasattr(shape_data, 'objects'):
-        objects = shape_data.objects
-    elif hasattr(shape_data, 'objects_v7'):
-        objects = shape_data.objects_v7
-
-    if hasattr(shape_data, 'transforms'):
-        transforms = shape_data.transforms
-    elif hasattr(shape_data, 'transforms_v7'):
-        transforms = shape_data.transforms_v7
-
-    if hasattr(shape_data, 'nodes'):
-        nodes = shape_data.nodes
-    elif hasattr(shape_data, 'nodes_v7'):
-        nodes = shape_data.nodes_v7
-
-    # Create a dictionary of the nodes' children
-    for j in range(0, len(nodes)):
-        node_tree[j] = []
-        nodes[j].id = j  # Set an ID on the nodes so we can reference it later
-        for node2 in range(0, len(nodes)):
-            if nodes[node2].parent == j:
-                node_tree[j].append(node2)
-    #pprint.pprint(node_tree)
-
-
-    # Start with the roots, which come from the LODs
-    # Find any needed parents for the roots. Should only be the bounds box (0)
-    needed_parents = set()
-    for lod_idx in range(0, len(shape_data.details)):
-        if nodes[lod_idx].parent != -1:
-            needed_parents.add(nodes[lod_idx].parent)
-    #print(needed_parents)
-
-    # Root node (bounds)
-    store('var node_0 = new THREE.Group();')
-    store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
-    store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-        short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
-    ))
-    store('group.add(node_0);')
-
-    # Set up the node hierarchy
-    for child in node_tree[0]:
-        create_nodes(nodes[child], nodes, transforms, node_tree)
-
-
-
-    # Set up the node hierarchy
-    # for j in range(0, len(nodes)):
-    #     store('var node_{} = new THREE.Group();'.format(j))
-
-    #     def_trans = transforms[nodes[j].default_transform]
-    #     parent_trans = transforms[nodes[j].parent]
-    #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-    #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-    #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-    #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-    #     #))
-
-    #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
-    #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-    #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-    #         ))
-    #         store('group.add(node_{});'.format(j))
-    #     else:
-    #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
-    #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-    #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
-    #         ))
-    #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-    #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-    #         ))
-    #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
-else:
-    print("Shape was not of TS::Shape")
-    sys.exit(1)
-
-# Set up LoDs
-for lod in shape_data.details:
-    store("""
-    lods.push({{
-        node: node_{},
-        level: {}
-    }});""".format(lod.root_node_index, lod.size))
-    store('node_{}.visible = false;'.format(lod.root_node_index))
-store('lods[0].node.visible = true;')
-
-
-# Add meshes
-obj_id = 0
-mesh_data: Dts.TsAnimmesh
-for mesh_data in d.meshes:
-    is_debris = False
-    is_lod_shape = False
-    is_hulk = False
-    lod = 0
-    obj_name = names[objects[obj_id].name]
-    parent_node = objects[obj_id].node_index
-
-    if b'debris' in obj_name:
-        is_debris = True
-    elif b' ' in obj_name:
-        is_lod_shape = True
-        lod_parts = obj_name.split(b' ')
-        lod = int(lod_parts[len(lod_parts) - 1])
-
-    if b'hulk' in obj_name:
-        is_hulk = True
-
-    obj_id += 1
-    # if not is_lod_shape and not is_debris:
-    #    continue
-
-    # TEMP TODO: Toggle LODs and hulks
-    # if is_hulk or lod != 15:#128:#15:
-    #    continue
-
-    if is_hulk or is_debris:
-        continue
-
-    if len(mesh_data.faces) == 0:
-        continue
-
-    store()
-    store('//{}'.format(obj_name))
-    store('geometry = new THREE.Geometry();')
-
-    # Vertices
-    for vert in mesh_data.vertices:
-        store('geometry.vertices.push( new THREE.Vector3( {}, {}, {} ) );'.format(
-            vert.x, vert.y, vert.z
-        ))
-
-    # Faces
-    for face in mesh_data.faces:
-        store('geometry.faces.push( new THREE.Face3( {}, {}, {}, null, null, {} ) );'.format(
-            face.vip[0].vertex_index,
-            face.vip[1].vertex_index,
-            face.vip[2].vertex_index,
-            face.material
-        ))
-
-    # Invert the normals
-    store("""
-    for ( var i = 0; i < geometry.faces.length; i ++ ) {
-
-        var face = geometry.faces[ i ];
-        var temp = face.a;
-        face.a = face.c;
-        face.c = temp;
-
-    }
-
-    geometry.computeFaceNormals();
-    geometry.computeVertexNormals();
-                """)
-
-    # Texture vertices
-    store('textureVerts = [')
-    for vert in mesh_data.texture_vertices:
-        store('new THREE.Vector2({}, {}),'.format(
-            vert.x, vert.y
-        ))
-    store('];')
-
-    # Set up UVs
-    store('geometry.faceVertexUvs = [[')
-    for face in mesh_data.faces:
-        store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
-            face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
-        ))
-    store(']];')
-
-    # Flip UV normals
-    store("""
-    var faceVertexUvs = geometry.faceVertexUvs[ 0 ];
-    for ( var i = 0; i < faceVertexUvs.length; i ++ )
-    {
-        var temp = faceVertexUvs[ i ][ 0 ];
-        faceVertexUvs[ i ][ 0 ] = faceVertexUvs[ i ][ 2 ];
-        faceVertexUvs[ i ][ 2 ] = temp;
-    }
-                """)
-
-    # Scale it
-    store('geometry.scale({}, {}, {});'.format(
-        mesh_data.frames[0].scale.x,
-        mesh_data.frames[0].scale.y,
-        mesh_data.frames[0].scale.z
-    ))
-
-    # Create the mesh
-    store('mesh = new THREE.Mesh( geometry, [{}] );'.format(', '.join(textures)))
-
-    # Position the mesh
-    store('mesh.position.set({}, {}, {});'.format(
-        mesh_data.frames[0].origin.x,
-        mesh_data.frames[0].origin.y,  # + (lod if is_lod_shape else 0),
-        mesh_data.frames[0].origin.z  # - (15 if (is_debris or is_hulk) else 0)
-    ))
-
-    # Add the mesh to the node's group
-    store('node_{}.add(mesh);'.format(parent_node))
-
-
-shape_data: Dts.TsShape = d.shape.data.obj_data
-# Create a panel to hold sequences
-store("""
-const panel = new GUI( { width: 310 } );
-const folder_lod = panel.addFolder('Level of Detail');
-const folder_seq = panel.addFolder('Sequences');
-
-var _sequences = {};
-""")
-
-store("""
-controller_settings = {{
-    lod: {defLOD}
-}};
-""".format(defLOD=int(shape_data.details[0].size)))
-store('folder_lod.add( controller_settings, "lod", [ {} ] ).name( "Level" ).onChange( updateLod );'.format(
-    ', '.join(str(int(x.size)) for x in shape_data.details)
-))
-store('folder_lod.open();')
-
-for sequence in shape_data.sequences:
-    # store(str(names[sequence.name]))
-    seq_name_ascii = names[sequence.name].decode('ascii')
-    store('_sequences["{}"] = true;'.format(seq_name_ascii))
-    store('folder_seq.add(_sequences, "{}");'.format(seq_name_ascii))
-
-store('folder_seq.open();')
-
-
-
-# Create the sequences
-
-# TODO: HANDLE IFL SEQUENCES
-
-subsequences = None
-keyframes = None
-if hasattr(shape_data, 'subsequences'):
-    subsequences = shape_data.subsequences
-elif hasattr(shape_data, 'subsequences_v7'):
-    subsequences = shape_data.subsequences_v7
-
-if hasattr(shape_data, 'keyframes'):
-    keyframes = shape_data.keyframes
-elif hasattr(shape_data, 'keyframes_v7'):
-    keyframes = shape_data.keyframes_v7
-
-node_id = 0
-for node in nodes:
-    if node.num_subsequences: # TODO: LODs
-        subseq = subsequences[node.first_subsequence]
-        store("""
-const animationGroup_node{} = new THREE.AnimationObjectGroup();
-animationGroup_node{}.add( node_{} );
-        """.format(node_id, node_id, node_id))
-        first_keyframe = subseq.first_keyframe
-
-        store("""
-const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
-'.quaternion', 
-            """.format(node_id))
-        store('[')
-        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-            store('{}, '.format(keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
-        store(']')
-
-        store(', [')
-        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-            trans = transforms[keyframes[key].key_value]
-            store('{}, {}, {}, {}, '.format(
-                short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
-            ))
-        store(']);')
-
-        store("""
-const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
-
-let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
-const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
-//clipAction_node{n_id}.play();
-mixers.push(mixer_node{n_id});
-        """.format(n_id=node_id, seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'), duration=shape_data.sequences[subseq.sequence_index].duration))
-    node_id += 1
-
-
-
-
-with open('footer.html', 'r') as f:
-    with open(out_path, 'a') as g:
-        g.write(f.read())
-
-sys.exit(0)
-
-# Create the power sequence
-if b'power' in names:
-    # Find the sequence ID for the power sequence
-    seq_id = 0
-    for sequence in shape_data.sequences:
-        if names[sequence.name] == b'power':
-            break
-        seq_id += 1
-
-    # TODO: HANDLE IFL SEQUENCES
-
-    subsequences = None
-    if hasattr(shape_data, 'subsequences'):
-        subsequences = shape_data.subsequences
-    elif hasattr(shape_data, 'subsequences_v7'):
-        subsequences = shape_data.subsequences_v7
-
-    # Find the node with a sequence that corresponds to it
-    node_id = 0
-    for node in nodes:
-        lod = 0
-        if b' ' in names[node.name]:
-            is_lod_shape = True
-            lod_parts = names[node.name].split(b' ')
-            lod = int(lod_parts[len(lod_parts) - 1])
-
-        if node.num_subsequences and lod == 15: # TODO: LODs
-            subseq = subsequences[node.first_subsequence]
-            if subseq.sequence_index == seq_id:
-                store("""
-const animationGroup_node{} = new THREE.AnimationObjectGroup();
-animationGroup_node{}.add( node_{} );
-                """.format(node_id, node_id, node_id))
-                first_keyframe = subseq.first_keyframe
-
-                store("""
-const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
-'.quaternion', 
-                    """.format(node_id))
-                store('[')
-                for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                    store('{}, '.format(shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
-                store(']')
-
-                store(', [')
-                for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                    trans = transforms[shape_data.keyframes[key].key_value]
-                    store('{}, {}, {}, {}, '.format(
-                        short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
+import bpy
+import bmesh
+from bpy import ops
+from bpy_extras.io_utils import ImportHelper
+from bpy.props import StringProperty, FloatProperty
+
+class ImportDTS(bpy.types.Operator, ImportHelper):
+    bl_idname = "dynamix.dts"
+    bl_label = "Import Starsiege: Tribes .dts"
+    bl_description = 'Imports Starsiege: Tribes .dts file.'
+
+    filter_glob : StringProperty(default="*.dts", options={'HIDDEN'})
+    filename_ext = ".dts"
+    
+    def execute(self, context):
+        import re
+
+        filename = self.filepath.split('/')[-1].split('.')[0]
+        path = self.filepath
+        
+        # Collection created, but not used yet
+        obj_collection = bpy.data.collections.new(filename)
+        context.scene.collection.children.link(obj_collection)
+
+        with open(path, 'r') as f:
+            def store(str=''):
+                print(str)
+                with open(out_path, 'a') as f:
+                    f.write(str + "\n")
+                
+            def short2float(short):
+                if short == 0:
+                    return 0
+                return float(short) / float(0x7FFF)
+
+            def create_nodes(node: Dts.Node, nodes, transforms, node_tree):
+                store('var node_{} = new THREE.Group();'.format(node.id))
+
+                def_trans = transforms[nodes[node.id].default_transform]
+                if nodes[node.id].parent == -1:
+                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
                     ))
-                store(']);')
+                    store('group.add(node_{});'.format(node.id))
+                else:
+                    #store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
+                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
+                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
+                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
+                    store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
+                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
+                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                    ))
+                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
 
+                for child in node_tree[node.id]:
+                    create_nodes(nodes[child], nodes, transforms, node_tree)
+
+            #file_path = "./shapes/indoorgun.DTS"
+
+            out_path = filename + ".html"
+
+            if os.path.exists(out_path):
+                os.truncate(out_path, 0)
+
+#            with open('header.html', 'r') as f:
+#                with open(out_path, 'w') as g:
+#                    g.write(f.read())
+            
+            d = Dts.from_file(path)
+
+            MAX_VAL = float(0x7FFF)
+            names = []
+            nodes = []
+            objects = []
+            textures = []
+            transforms = []
+            node_tree = {}
+
+            store('var geometry = null;')
+            store('var mesh = null;')
+            store('var texture = null;')
+            store('var material = null;')
+            store('var textureVerts = null;')
+
+            # Load textures
+            if d.has_materials and d.materials:
+                i = 0
+                for param in d.materials.params:
+                    bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
+                    texture = None
+                    if len(bitmap_name):
+                        bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
+                        bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
+                        texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(bitmap_name.decode('ascii'))
+                        store(texture)
+                        store('texture_' + str(i) + '.flipY = false;')
+
+                    store('const material_' + str(i) + ' = new THREE.MeshBasicMaterial({')
+                    store('//color: 0x{}{}{},'.format(format(param.rgb.red, 'X'), format(param.rgb.green, 'X'), format(param.rgb.blue, 'X')))
+                    if len(bitmap_name):
+                        store('map: {},'.format('texture_' + str(i)))
+                        store('transparent: true,')
+
+                    store('});')
+                    textures.append('material_' + str(i))
+                    i += 1
+
+            # Make nodes
+            if b'TS::Shape' in d.shape.data.classname:
+                shape_data: Dts.TsShape = d.shape.data.obj_data
+
+                for name in shape_data.names:
+                    names.append(name[:name.find(b'\0')])
+
+                if hasattr(shape_data, 'objects'):
+                    objects = shape_data.objects
+                elif hasattr(shape_data, 'objects_v7'):
+                    objects = shape_data.objects_v7
+
+                if hasattr(shape_data, 'transforms'):
+                    transforms = shape_data.transforms
+                elif hasattr(shape_data, 'transforms_v7'):
+                    transforms = shape_data.transforms_v7
+
+                if hasattr(shape_data, 'nodes'):
+                    nodes = shape_data.nodes
+                elif hasattr(shape_data, 'nodes_v7'):
+                    nodes = shape_data.nodes_v7
+
+                # Create a dictionary of the nodes' children
+                for j in range(0, len(nodes)):
+                    node_tree[j] = []
+                    nodes[j].id = j  # Set an ID on the nodes so we can reference it later
+                    for node2 in range(0, len(nodes)):
+                        if nodes[node2].parent == j:
+                            node_tree[j].append(node2)
+                #pprint.pprint(node_tree)
+
+
+                # Start with the roots, which come from the LODs
+                # Find any needed parents for the roots. Should only be the bounds box (0)
+                needed_parents = set()
+                for lod_idx in range(0, len(shape_data.details)):
+                    if nodes[lod_idx].parent != -1:
+                        needed_parents.add(nodes[lod_idx].parent)
+                #print(needed_parents)
+
+                # Root node (bounds)
+                store('var node_0 = new THREE.Group();')
+                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
+                store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                    short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
+                ))
+                store('group.add(node_0);')
+
+                # Set up the node hierarchy
+                for child in node_tree[0]:
+                    create_nodes(nodes[child], nodes, transforms, node_tree)
+
+
+
+                # Set up the node hierarchy
+                # for j in range(0, len(nodes)):
+                #     store('var node_{} = new THREE.Group();'.format(j))
+
+                #     def_trans = transforms[nodes[j].default_transform]
+                #     parent_trans = transforms[nodes[j].parent]
+                #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #     #))
+
+                #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #         ))
+                #         store('group.add(node_{});'.format(j))
+                #     else:
+                #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
+                #         ))
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #         ))
+                #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
+            else:
+                print("Shape was not of TS::Shape")
+                sys.exit(1)
+
+            # Set up LoDs
+            for lod in shape_data.details:
                 store("""
-const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
-
-let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
-const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
-clipAction_node{n_id}.play();
-mixers.push(mixer_node{n_id});
-                """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'), duration=shape_data.sequences[seq_id].duration))
-        node_id += 1
+                lods.push({{
+                    node: node_{},
+                    level: {}
+                }});""".format(lod.root_node_index, lod.size))
+                store('node_{}.visible = false;'.format(lod.root_node_index))
+            store('lods[0].node.visible = true;')
 
 
+            # Add meshes
+            obj_id = 0
+            mesh_data: Dts.TsAnimmesh
+            for mesh_data in d.meshes:
+                is_debris = False
+                is_lod_shape = False
+                is_hulk = False
+                lod = 0
+                obj_name = names[objects[obj_id].name]
+                parent_node = objects[obj_id].node_index
+
+                if b'debris' in obj_name:
+                    is_debris = True
+                elif b' ' in obj_name:
+                    is_lod_shape = True
+                    lod_parts = obj_name.split(b' ')
+                    lod = int(lod_parts[len(lod_parts) - 1])
+
+                if b'hulk' in obj_name:
+                    is_hulk = True
+
+                obj_id += 1
+                # if not is_lod_shape and not is_debris:
+                #    continue
+
+                # TEMP TODO: Toggle LODs and hulks
+                # if is_hulk or lod != 15:#128:#15:
+                #    continue
+
+                if is_hulk or is_debris:
+                    continue
+
+                if len(mesh_data.faces) == 0:
+                    continue
+
+                store()
+                store('//{}'.format(obj_name))
+                store('geometry = new THREE.Geometry();')
+
+                # Vertices
+                for vert in mesh_data.vertices:
+                    store('geometry.vertices.push( new THREE.Vector3( {}, {}, {} ) );'.format(
+                        vert.x, vert.y, vert.z
+                    ))
+
+                # Faces
+                for face in mesh_data.faces:
+                    store('geometry.faces.push( new THREE.Face3( {}, {}, {}, null, null, {} ) );'.format(
+                        face.vip[0].vertex_index,
+                        face.vip[1].vertex_index,
+                        face.vip[2].vertex_index,
+                        face.material
+                    ))
+
+                # Invert the normals
+                store("""
+                for ( var i = 0; i < geometry.faces.length; i ++ ) {
+
+                    var face = geometry.faces[ i ];
+                    var temp = face.a;
+                    face.a = face.c;
+                    face.c = temp;
+
+                }
+
+                geometry.computeFaceNormals();
+                geometry.computeVertexNormals();
+                            """)
+
+                # Texture vertices
+                store('textureVerts = [')
+                for vert in mesh_data.texture_vertices:
+                    store('new THREE.Vector2({}, {}),'.format(
+                        vert.x, vert.y
+                    ))
+                store('];')
+
+                # Set up UVs
+                store('geometry.faceVertexUvs = [[')
+                for face in mesh_data.faces:
+                    store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
+                        face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
+                    ))
+                store(']];')
+
+                # Flip UV normals
+                store("""
+                var faceVertexUvs = geometry.faceVertexUvs[ 0 ];
+                for ( var i = 0; i < faceVertexUvs.length; i ++ )
+                {
+                    var temp = faceVertexUvs[ i ][ 0 ];
+                    faceVertexUvs[ i ][ 0 ] = faceVertexUvs[ i ][ 2 ];
+                    faceVertexUvs[ i ][ 2 ] = temp;
+                }
+                            """)
+
+                # Scale it
+                store('geometry.scale({}, {}, {});'.format(
+                    mesh_data.frames[0].scale.x,
+                    mesh_data.frames[0].scale.y,
+                    mesh_data.frames[0].scale.z
+                ))
+
+                # Create the mesh
+                store('mesh = new THREE.Mesh( geometry, [{}] );'.format(', '.join(textures)))
+
+                # Position the mesh
+                store('mesh.position.set({}, {}, {});'.format(
+                    mesh_data.frames[0].origin.x,
+                    mesh_data.frames[0].origin.y,  # + (lod if is_lod_shape else 0),
+                    mesh_data.frames[0].origin.z  # - (15 if (is_debris or is_hulk) else 0)
+                ))
+
+                # Add the mesh to the node's group
+                store('node_{}.add(mesh);'.format(parent_node))
+
+
+            shape_data: Dts.TsShape = d.shape.data.obj_data
+            # Create a panel to hold sequences
+            store("""
+            const panel = new GUI( { width: 310 } );
+            const folder_lod = panel.addFolder('Level of Detail');
+            const folder_seq = panel.addFolder('Sequences');
+
+            var _sequences = {};
+            """)
+
+            store("""
+            controller_settings = {{
+                lod: {defLOD}
+            }};
+            """.format(defLOD=int(shape_data.details[0].size)))
+            store('folder_lod.add( controller_settings, "lod", [ {} ] ).name( "Level" ).onChange( updateLod );'.format(
+                ', '.join(str(int(x.size)) for x in shape_data.details)
+            ))
+            store('folder_lod.open();')
+
+            for sequence in shape_data.sequences:
+                # store(str(names[sequence.name]))
+                seq_name_ascii = names[sequence.name].decode('ascii')
+                store('_sequences["{}"] = true;'.format(seq_name_ascii))
+                store('folder_seq.add(_sequences, "{}");'.format(seq_name_ascii))
+
+            store('folder_seq.open();')
 
 
 
+            # Create the sequences
+
+            # TODO: HANDLE IFL SEQUENCES
+
+            subsequences = None
+            keyframes = None
+            if hasattr(shape_data, 'subsequences'):
+                subsequences = shape_data.subsequences
+            elif hasattr(shape_data, 'subsequences_v7'):
+                subsequences = shape_data.subsequences_v7
+
+            if hasattr(shape_data, 'keyframes'):
+                keyframes = shape_data.keyframes
+            elif hasattr(shape_data, 'keyframes_v7'):
+                keyframes = shape_data.keyframes_v7
+
+            node_id = 0
+            for node in nodes:
+                if node.num_subsequences: # TODO: LODs
+                    subseq = subsequences[node.first_subsequence]
+                    store("""
+            const animationGroup_node{} = new THREE.AnimationObjectGroup();
+            animationGroup_node{}.add( node_{} );
+                    """.format(node_id, node_id, node_id))
+                    first_keyframe = subseq.first_keyframe
+
+                    store("""
+            const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
+            '.quaternion', 
+                        """.format(node_id))
+                    store('[')
+                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                        store('{}, '.format(keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
+                    store(']')
+
+                    store(', [')
+                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                        trans = transforms[keyframes[key].key_value]
+                        store('{}, {}, {}, {}, '.format(
+                            short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
+                        ))
+                    store(']);')
+
+                    store("""
+            const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
+
+            let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
+            const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
+            //clipAction_node{n_id}.play();
+            mixers.push(mixer_node{n_id});
+                    """.format(n_id=node_id, seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'), duration=shape_data.sequences[subseq.sequence_index].duration))
+                node_id += 1
+
+            # Create the power sequence
+            if b'power' in names:
+                # Find the sequence ID for the power sequence
+                seq_id = 0
+                for sequence in shape_data.sequences:
+                    if names[sequence.name] == b'power':
+                        break
+                    seq_id += 1
+
+                # TODO: HANDLE IFL SEQUENCES
+
+                subsequences = None
+                if hasattr(shape_data, 'subsequences'):
+                    subsequences = shape_data.subsequences
+                elif hasattr(shape_data, 'subsequences_v7'):
+                    subsequences = shape_data.subsequences_v7
+
+                # Find the node with a sequence that corresponds to it
+                node_id = 0
+                for node in nodes:
+                    lod = 0
+                    if b' ' in names[node.name]:
+                        is_lod_shape = True
+                        lod_parts = names[node.name].split(b' ')
+                        lod = int(lod_parts[len(lod_parts) - 1])
+
+                    if node.num_subsequences and lod == 15: # TODO: LODs
+                        subseq = subsequences[node.first_subsequence]
+                        if subseq.sequence_index == seq_id:
+                            store("""
+            const animationGroup_node{} = new THREE.AnimationObjectGroup();
+            animationGroup_node{}.add( node_{} );
+                            """.format(node_id, node_id, node_id))
+                            first_keyframe = subseq.first_keyframe
+
+                            store("""
+            const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
+            '.quaternion', 
+                                """.format(node_id))
+                            store('[')
+                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                store('{}, '.format(shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
+                            store(']')
+
+                            store(', [')
+                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                trans = transforms[shape_data.keyframes[key].key_value]
+                                store('{}, {}, {}, {}, '.format(
+                                    short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
+                                ))
+                            store(']);')
+
+                            store("""
+            const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
+
+            let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
+            const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
+            clipAction_node{n_id}.play();
+            mixers.push(mixer_node{n_id});
+                            """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'), duration=shape_data.sequences[seq_id].duration))
+                    node_id += 1
