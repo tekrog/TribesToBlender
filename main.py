@@ -44,21 +44,34 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 def_trans = transforms[nodes[node.id].default_transform]
                 if nodes[node.id].parent == -1:
-                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                    ))
+#                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+#                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+#                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+ #                   ))
                     store('group.add(node_{});'.format(node.id))
+                    # Create an object with the node's id
+                    object = bpy.data.objects.new(str(node.id), None)
+                    bpy.data.collections[filename].objects.link(object)
+                    object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                    
                 else:
                     #store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
-                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
-                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
-                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
-                    store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
-                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
-                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                    ))
-                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
+#                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
+#                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
+#                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
+#                    store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
+#                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
+#                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+#                    ))
+#                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
+
+## Fix translation
+                    # Create an object with the node's id
+                    object = bpy.data.objects.new(str(node.id), None)
+                    bpy.data.collections[filename].objects.link(object)
+                    object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
 
                 for child in node_tree[node.id]:
                     create_nodes(nodes[child], nodes, transforms, node_tree)
@@ -100,17 +113,35 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
                         bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
                         texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(bitmap_name.decode('ascii'))
-                        store(texture)
-                        store('texture_' + str(i) + '.flipY = false;')
 
-                    store('const material_' + str(i) + ' = new THREE.MeshBasicMaterial({')
-                    store('//color: 0x{}{}{},'.format(format(param.rgb.red, 'X'), format(param.rgb.green, 'X'), format(param.rgb.blue, 'X')))
+                    # Create a new material based on the material id
+                    # set str(i) to dts name + i
+                    mat = bpy.data.materials.new(str(i))
+                    mat.use_nodes = True
+                    nodes = mat.node_tree.nodes
+                    # check alpha paramater, may need to flip 0 to 1, and 1 to 0
+                    nodes["Principled BSDF"].inputs[0].default_value = (param.rgb.red, param.rgb.green, param.rgb.blue, param.alpha)
+                    
                     if len(bitmap_name):
                         store('map: {},'.format('texture_' + str(i)))
                         store('transparent: true,')
+                        
+                        # Create the image texture node
+                        shader_node = nodes.new("ShaderNodeTexImage")
+                        shader_node.location = -400,200
+                        shader_node.select = True
+                        
+                        # Create the path to the image based on the model path
+                        # if os.path exists statement for checking for .bmp
+                        image_path = filename.rsplit('\\', 1)[0] + '\\' + bitmap_name.decode('ascii') # set i to dts name + i
+                        shader_node.image = bpy.data.images.load(image_path)
+                        
+                        # Link the image texture node to the color slot on the BSDF node
+                        links = mat.node_tree.links
+                        link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
 
-                    store('});')
                     textures.append('material_' + str(i))
+                            
                     i += 1
 
             # Make nodes
@@ -160,39 +191,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
                 ))
                 store('group.add(node_0);')
+                # Create an object with the node's name
+                object = bpy.data.objects.new('node_0', None)
+                bpy.data.collections[filename].objects.link(object)
+                object.location = [transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z]
+                object.rotation_quaternion = [short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)]
 
                 # Set up the node hierarchy
                 for child in node_tree[0]:
                     create_nodes(nodes[child], nodes, transforms, node_tree)
 
-
-
-                # Set up the node hierarchy
-                # for j in range(0, len(nodes)):
-                #     store('var node_{} = new THREE.Group();'.format(j))
-
-                #     def_trans = transforms[nodes[j].default_transform]
-                #     parent_trans = transforms[nodes[j].parent]
-                #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-                #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #     #))
-
-                #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #         ))
-                #         store('group.add(node_{});'.format(j))
-                #     else:
-                #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
-                #         ))
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #         ))
-                #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
             else:
                 print("Shape was not of TS::Shape")
                 sys.exit(1)
