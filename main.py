@@ -105,6 +105,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             # Load textures
             if d.has_materials and d.materials:
+                material_count = 0
                 i = 0
                 for param in d.materials.params:
                     bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
@@ -114,34 +115,39 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
                         texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(bitmap_name.decode('ascii'))
 
-                    # Create a new material based on the material id
-                    # set str(i) to dts name + i
-                    mat = bpy.data.materials.new(str(i))
+                    # Blender - Create a new material based on the model name and material id
+                    mat = bpy.data.materials.new(filename.split('\\')[-1] + '.' + str(i))
                     mat.use_nodes = True
                     nodes = mat.node_tree.nodes
-                    # check alpha paramater, may need to flip 0 to 1, and 1 to 0
+# check alpha paramater, may need to flip 0 to 1, and 1 to 0
                     nodes["Principled BSDF"].inputs[0].default_value = (param.rgb.red, param.rgb.green, param.rgb.blue, param.alpha)
                     
                     if len(bitmap_name):
                         store('map: {},'.format('texture_' + str(i)))
                         store('transparent: true,')
                         
-                        # Create the image texture node
+                        # Blender - Create the image texture node
                         shader_node = nodes.new("ShaderNodeTexImage")
                         shader_node.location = -400,200
                         shader_node.select = True
-                        
                         # Create the path to the image based on the model path
-                        # if os.path exists statement for checking for .bmp
-                        image_path = filename.rsplit('\\', 1)[0] + '\\' + bitmap_name.decode('ascii') # set i to dts name + i
-                        shader_node.image = bpy.data.images.load(image_path)
-                        
+                        image_path = filename.rsplit('\\', 1)[0] + '\\' + bitmap_name.decode('ascii')
+                        # Check if .png exists
+                        if os.path.exists(image_path):
+                            shader_node.image = bpy.data.images.load(image_path)
+                        # Check if .bmp exists
+                        else:
+                            image_path = image_path.rsplit('.', 1)[0] + ".bmp"
+                            if os.path.exists(image_path):
+                                shader_node.image = bpy.data.images.load(image_path)                                
                         # Link the image texture node to the color slot on the BSDF node
                         links = mat.node_tree.links
                         link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
 
                     textures.append('material_' + str(i))
-                            
+                    # Blender - count materials, used for face maps
+                    material_count += 1
+                    
                     i += 1
 
             # Make nodes
@@ -191,7 +197,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
                 ))
                 store('group.add(node_0);')
-                # Create an object with the node's name
+                # Create an object with the root node's name
                 object = bpy.data.objects.new('node_0', None)
                 bpy.data.collections[filename].objects.link(object)
                 object.location = [transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z]
@@ -226,6 +232,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 lod = 0
                 obj_name = names[objects[obj_id].name]
                 parent_node = objects[obj_id].node_index
+                array_verts_all = [] # Blender
+                array_faces = [] # Blender
+                array_faces_material = [] # Blender
 
                 if b'debris' in obj_name:
                     is_debris = True
@@ -254,12 +263,15 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 store()
                 store('//{}'.format(obj_name))
                 store('geometry = new THREE.Geometry();')
-
+                    
                 # Vertices
                 for vert in mesh_data.vertices:
                     store('geometry.vertices.push( new THREE.Vector3( {}, {}, {} ) );'.format(
                         vert.x, vert.y, vert.z
                     ))
+                    # Blender - Put all the vertices in an array of [x, y, z]
+                    array_val = [vert.x, vert.y, vert.z]
+                    array_verts_all.append(array_val)
 
                 # Faces
                 for face in mesh_data.faces:
@@ -269,7 +281,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         face.vip[2].vertex_index,
                         face.material
                     ))
-
+                    # Blender - Put all the faces in an array of [v1, v2, v3]
+                    array_val = [face.vip[0].vertex_index, face.vip[1].vertex_index, face.vip[2].vertex_index]
+                    array_faces.append(array_val)
+                    array_faces_material.append(face.material)
+                    
                 # Invert the normals
                 store("""
                 for ( var i = 0; i < geometry.faces.length; i ++ ) {
@@ -331,7 +347,47 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 # Add the mesh to the node's group
                 store('node_{}.add(mesh);'.format(parent_node))
-
+                
+                # Blender - Create an object with the node's id
+                mesh = bpy.data.meshes.new(str(obj_name))
+                object = bpy.data.objects.new(str(obj_name), mesh)
+                # Put the object in a collection
+                bpy.data.collections[filename].objects.link(object)
+                # Set the location and rotation of the object
+                object.location = [mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z]
+                #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                # Create the mesh of the object
+                mesh.from_pydata(array_verts_all,[],array_faces)
+                object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
+                # Select object by name
+                ob = bpy.context.scene.objects[str(obj_name)]       # Get the object
+                bpy.ops.object.select_all(action='DESELECT') # Deselect all objects
+                bpy.context.view_layer.objects.active = ob   # Make the desired object the active object 
+                ob.select_set(True)                          # Select the object                
+                # Create the face maps
+                x = 0
+                while (x < material_count):
+                    bpy.ops.object.face_map_add()
+                    mat = bpy.data.materials.get(filename.split('\\')[-1] + '.' + str(x))
+                    object.data.materials.append(mat)
+                    x += 1
+                # Switch object modes, not sure why we have to go into edit mode and than back to object mode
+                ob = bpy.context.active_object
+                bpy.ops.object.mode_set(mode = 'EDIT') 
+                bpy.ops.mesh.select_mode(type="FACE")
+                bpy.ops.mesh.select_all(action = 'DESELECT')
+                bpy.ops.object.mode_set(mode = 'OBJECT')
+                # Loop through all faces and assign to face map
+                x = 0
+                for k in ob.data.polygons:
+                    ob.data.polygons[x].select = True
+                    bpy.ops.object.mode_set(mode = 'EDIT')
+                    ob.face_maps.active_index = int(array_faces_material[x])
+                    bpy.ops.object.face_map_assign()
+                    # Deselect faces so their mapping doesn't change
+                    bpy.ops.object.face_map_deselect()
+                    bpy.ops.object.mode_set(mode = 'OBJECT')
+                    x += 1
 
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
