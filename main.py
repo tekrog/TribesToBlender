@@ -239,9 +239,12 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 if b'debris' in obj_name:
                     is_debris = True
                 elif b' ' in obj_name:
-                    is_lod_shape = True
                     lod_parts = obj_name.split(b' ')
-                    lod = int(lod_parts[len(lod_parts) - 1])
+                    second_name = lod_parts[len(lod_parts) - 1]
+
+                    if second_name.decode('ascii').isnumeric():
+                        is_lod_shape = True
+                        lod = int(second_name)
 
                 if b'hulk' in obj_name:
                     is_hulk = True
@@ -494,9 +497,12 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 for node in nodes:
                     lod = 0
                     if b' ' in names[node.name]:
-                        is_lod_shape = True
                         lod_parts = names[node.name].split(b' ')
-                        lod = int(lod_parts[len(lod_parts) - 1])
+                        second_name = lod_parts[len(lod_parts) - 1]
+
+                        if second_name.decode('ascii').isnumeric():
+                            is_lod_shape = True
+                            lod = int(second_name)
 
                     if node.num_subsequences and lod == 15: # TODO: LODs
                         subseq = subsequences[node.first_subsequence]
