@@ -30,7 +30,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
         with open(path, 'r') as f:
             def store(str=''):
-                print(str)
+#                print(str)
                 with open(out_path, 'a') as f:
                     f.write(str + "\n")
                 
@@ -197,7 +197,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
                 ))
                 store('group.add(node_0);')
-                # Create an object with the root node's name
+                # Blender - Create an object with the root node's name
                 object = bpy.data.objects.new('node_0', None)
                 bpy.data.collections[filename].objects.link(object)
                 object.location = [transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z]
@@ -235,6 +235,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 array_verts_all = [] # Blender
                 array_faces = [] # Blender
                 array_faces_material = [] # Blender
+                array_texvert = [] # Blender
+                array_uvs = [] # Blender
 
                 if b'debris' in obj_name:
                     is_debris = True
@@ -310,6 +312,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     store('new THREE.Vector2({}, {}),'.format(
                         vert.x, vert.y
                     ))
+                    # Blender - Put all the texture vertices in an array of [x, y]
+                    array_val = [vert.x, vert.y]
+                    array_texvert.append(array_val)
                 store('];')
 
                 # Set up UVs
@@ -318,6 +323,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
                         face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
                     ))
+                    # Blender - Look up texture vertices from face indices
+                    array_val = array_texvert[face.vip[0].texture_index]
+                    array_uvs.append(array_val)
+                    array_val = array_texvert[face.vip[1].texture_index]
+                    array_uvs.append(array_val)
+                    array_val = array_texvert[face.vip[2].texture_index]
+                    array_uvs.append(array_val)
                 store(']];')
 
                 # Flip UV normals
@@ -380,17 +392,25 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 bpy.ops.mesh.select_mode(type="FACE")
                 bpy.ops.mesh.select_all(action = 'DESELECT')
                 bpy.ops.object.mode_set(mode = 'OBJECT')
-                # Loop through all faces and assign to face map
+                # Loop through all faces and assign to face map and assign material
                 x = 0
                 for k in ob.data.polygons:
                     ob.data.polygons[x].select = True
                     bpy.ops.object.mode_set(mode = 'EDIT')
                     ob.face_maps.active_index = int(array_faces_material[x])
                     bpy.ops.object.face_map_assign()
+                    # Assign material
+                    bpy.context.object.active_material_index = int(array_faces_material[x])
+                    bpy.ops.object.material_slot_assign()
                     # Deselect faces so their mapping doesn't change
                     bpy.ops.object.face_map_deselect()
                     bpy.ops.object.mode_set(mode = 'OBJECT')
                     x += 1
+
+                # Create the UV map
+                new_uv = ob.data.uv_layers.new(name='UV Map')
+                for loop in ob.data.loops:
+                    new_uv.data[loop.index].uv = array_uvs[loop.index]
 
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
