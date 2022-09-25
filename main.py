@@ -11,20 +11,21 @@ from bpy import ops
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty, FloatProperty
 
+
 class ImportDTS(bpy.types.Operator, ImportHelper):
     bl_idname = "dynamix.dts"
     bl_label = "Import Starsiege: Tribes .dts"
     bl_description = 'Imports Starsiege: Tribes .dts file.'
 
-    filter_glob : StringProperty(default="*.dts", options={'HIDDEN'})
+    filter_glob: StringProperty(default="*.dts", options={'HIDDEN'})
     filename_ext = ".dts"
-    
+
     def execute(self, context):
         import re
 
         filename = self.filepath.split('/')[-1].split('.')[0]
         path = self.filepath
-        
+
         # Collection created, but not used yet
         obj_collection = bpy.data.collections.new(filename)
         context.scene.collection.children.link(obj_collection)
@@ -34,31 +35,30 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #                print(str)
                 with open(out_path, 'a') as f:
                     f.write(str + "\n")
-                
+
             def short2float(short):
                 if short == 0:
                     return 0
                 return float(short) / float(0x7FFF)
 
             def create_nodes(node: Dts.Node, nodes, transforms, node_tree, names):
-#                store('var node_{} = new THREE.Group();'.format(node.id))
-                # Blender - Create an object with the node's id
-                object = bpy.data.objects.new(names[node].name], None)
-                
+                store('var node_{} = new THREE.Group();'.format(node.id))
+                object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
+
                 def_trans = transforms[nodes[node.id].default_transform]
                 if nodes[node.id].parent == -1:
 #                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
 #                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
 #                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
- #                   ))
+#                   ))
                     store('group.add(node_{});'.format(node.id))
-                    # Blender
-                    bpy.data.collections[filename].objects.link(object)
+                    # Create an object with the node's id
                     object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
-                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-                    
+                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
+                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+
                 else:
-                    #store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
+# store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
 #                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
 #                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
 #                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
@@ -68,21 +68,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #                    ))
 #                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
 
-## Fix translation
-                    # Blender
-                    bpy.data.collections[filename].objects.link(object)
-                    vec = mathutils.Vector((def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-                    inv = object.matrix_world.copy()
-                    inv.invert()
-                    vec_rot = vec @ inv
-                    object.location = object.location + vec_rot
-                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-                    object.parent = bpy.context.scene.objects['node_' + str(nodes[node.id].parent)]
+                    ## Fix translation
+                    # Create an object with the node's id
+                    object.location += object.parent.location + mathutils.Vector((def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
+                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
 
                 for child in node_tree[node.id]:
                     create_nodes(nodes[child], nodes, transforms, node_tree, names)
 
-            #file_path = "./shapes/indoorgun.DTS"
+            # file_path = "./shapes/indoorgun.DTS"
 
             out_path = filename + ".html"
 
@@ -92,7 +87,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #            with open('header.html', 'r') as f:
 #                with open(out_path, 'w') as g:
 #                    g.write(f.read())
-            
+
             d = Dts.from_file(path)
 
             MAX_VAL = float(0x7FFF)
@@ -119,22 +114,24 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     if len(bitmap_name):
                         bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
                         bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
-                        texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(bitmap_name.decode('ascii'))
+                        texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(
+                            bitmap_name.decode('ascii'))
 
                     # Blender - Create a new material based on the model name and material id
                     mat = bpy.data.materials.new(filename.split('\\')[-1] + '.' + str(i))
                     mat.use_nodes = True
                     nodes = mat.node_tree.nodes
-# check alpha paramater, may need to flip 0 to 1, and 1 to 0
-                    nodes["Principled BSDF"].inputs[0].default_value = (param.rgb.red, param.rgb.green, param.rgb.blue, param.alpha)
-                    
+                    # check alpha paramater, may need to flip 0 to 1, and 1 to 0
+                    nodes["Principled BSDF"].inputs[0].default_value = (
+                    param.rgb.red, param.rgb.green, param.rgb.blue, param.alpha)
+
                     if len(bitmap_name):
                         store('map: {},'.format('texture_' + str(i)))
                         store('transparent: true,')
-                        
+
                         # Blender - Create the image texture node
                         shader_node = nodes.new("ShaderNodeTexImage")
-                        shader_node.location = -400,200
+                        shader_node.location = -400, 200
                         shader_node.select = True
                         # Create the path to the image based on the model path
                         image_path = filename.rsplit('\\', 1)[0] + '\\' + bitmap_name.decode('ascii')
@@ -145,7 +142,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         else:
                             image_path = image_path.rsplit('.', 1)[0] + ".bmp"
                             if os.path.exists(image_path):
-                                shader_node.image = bpy.data.images.load(image_path)                                
+                                shader_node.image = bpy.data.images.load(image_path)
                         # Link the image texture node to the color slot on the BSDF node
                         links = mat.node_tree.links
                         link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
@@ -153,7 +150,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     textures.append('material_' + str(i))
                     # Blender - count materials, used for face maps
                     material_count += 1
-                    
+
                     i += 1
 
             # Make nodes
@@ -185,7 +182,31 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     for node2 in range(0, len(nodes)):
                         if nodes[node2].parent == j:
                             node_tree[j].append(node2)
-                #pprint.pprint(node_tree)
+                # pprint.pprint(node_tree)
+
+
+                # Blender - Create Objects for all objects, with dummy meshes
+                for node in nodes:
+                    print(str(names[node.name]))
+                    object = bpy.data.objects.new(str(names[node.name]), bpy.data.meshes.new(str(names[node.name])))
+                    bpy.data.collections[filename].objects.link(object)
+
+                # Set up nodes' parents
+                for node in nodes:
+                    object = bpy.context.scene.objects[str(names[node.name])]
+                    if node.parent != -1:
+                        print(str(names[node.name]), '->', str(names[nodes[node.parent].name]))
+                        parent = bpy.context.scene.objects[str(names[nodes[node.parent].name])]
+                        object.parent = parent
+
+                print()
+                for obj in objects:
+                    if str(names[obj.name]) not in bpy.context.scene.objects:
+                        print(str(names[obj.name]), '->', str(names[nodes[obj.node_index].name]))
+                        object = bpy.data.objects.new(str(names[obj.name]), bpy.data.meshes.new(str(names[obj.name])))
+                        parent = bpy.context.scene.objects[str(names[nodes[obj.node_index].name])]
+                        object.parent = parent
+                        bpy.data.collections[filename].objects.link(object)
 
 
                 # Start with the roots, which come from the LODs
@@ -194,20 +215,30 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 for lod_idx in range(0, len(shape_data.details)):
                     if nodes[lod_idx].parent != -1:
                         needed_parents.add(nodes[lod_idx].parent)
-                #print(needed_parents)
+                # print(needed_parents)
 
                 # Root node (bounds)
                 store('var node_0 = new THREE.Group();')
-                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
+                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x,
+                                                                transforms[nodes[0].default_transform].translate.y,
+                                                                transforms[nodes[0].default_transform].translate.z))
                 store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                    short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
+                    short2float(transforms[nodes[0].default_transform].rotate.x),
+                    short2float(transforms[nodes[0].default_transform].rotate.y),
+                    short2float(transforms[nodes[0].default_transform].rotate.z),
+                    short2float(transforms[nodes[0].default_transform].rotate.w)
                 ))
                 store('group.add(node_0);')
                 # Blender - Create an object with the root node's name
-                object = bpy.data.objects.new('node_0', None)
-                bpy.data.collections[filename].objects.link(object)
-                object.location = [transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z]
-                object.rotation_quaternion = [short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)]
+                # object = bpy.data.objects.new(str(names[nodes[0].name]), None)
+                # bpy.data.collections[filename].objects.link(object)
+                # object.location = [transforms[nodes[0].default_transform].translate.x,
+                #                    transforms[nodes[0].default_transform].translate.y,
+                #                    transforms[nodes[0].default_transform].translate.z]
+                # object.rotation_quaternion = [short2float(transforms[nodes[0].default_transform].rotate.x),
+                #                               short2float(transforms[nodes[0].default_transform].rotate.y),
+                #                               short2float(transforms[nodes[0].default_transform].rotate.z),
+                #                               short2float(transforms[nodes[0].default_transform].rotate.w)]
 
                 # Set up the node hierarchy
                 for child in node_tree[0]:
@@ -227,8 +258,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 store('node_{}.visible = false;'.format(lod.root_node_index))
             store('lods[0].node.visible = true;')
 
-
             # Add meshes
+            print('meshes')
+            print()
             obj_id = 0
             mesh_data: Dts.TsAnimmesh
             for mesh_data in d.meshes:
@@ -237,12 +269,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 is_hulk = False
                 lod = 0
                 obj_name = names[objects[obj_id].name]
+                print(str(obj_name))
                 parent_node = objects[obj_id].node_index
-                array_verts_all = [] # Blender
-                array_faces = [] # Blender
-                array_faces_material = [] # Blender
-                array_texvert = [] # Blender
-                array_uvs = [] # Blender
+                array_verts_all = []  # Blender
+                array_faces = []  # Blender
+                array_faces_material = []  # Blender
+                array_texvert = []  # Blender
+                array_uvs = []  # Blender
 
                 if b'debris' in obj_name:
                     is_debris = True
@@ -274,7 +307,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 store()
                 store('//{}'.format(obj_name))
                 store('geometry = new THREE.Geometry();')
-                    
+
                 # Vertices
                 for vert in mesh_data.vertices:
                     store('geometry.vertices.push( new THREE.Vector3( {}, {}, {} ) );'.format(
@@ -296,7 +329,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     array_val = [face.vip[0].vertex_index, face.vip[1].vertex_index, face.vip[2].vertex_index]
                     array_faces.append(array_val)
                     array_faces_material.append(face.material)
-                    
+
                 # Invert the normals
                 store("""
                 for ( var i = 0; i < geometry.faces.length; i ++ ) {
@@ -313,22 +346,22 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                             """)
 
                 # Texture vertices
-#                store('textureVerts = [')
+                store('textureVerts = [')
                 for vert in mesh_data.texture_vertices:
-#                    store('new THREE.Vector2({}, {}),'.format(
-#                        vert.x, vert.y
-#                    ))
+                    # store('new THREE.Vector2({}, {}),'.format(
+                    #     vert.x, vert.y
+                    # ))
                     # Blender - Put all the texture vertices in an array of [x, 1-y]. Blender uses a different texture space coordinate.
-                    array_val = [vert.x, 1-vert.y]
+                    array_val = [vert.x, 1 - vert.y]
                     array_texvert.append(array_val)
-#                store('];')
+                store('];')
 
                 # Set up UVs
-#                store('geometry.faceVertexUvs = [[')
+                # store('geometry.faceVertexUvs = [[')
                 for face in mesh_data.faces:
-#                    store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
-#                        face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
-#                    ))
+                    # store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
+                    #     face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
+                    # ))
                     # Blender - Look up texture vertices from face indices
                     array_val = array_texvert[face.vip[0].texture_index]
                     array_uvs.append(array_val)
@@ -336,7 +369,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     array_uvs.append(array_val)
                     array_val = array_texvert[face.vip[2].texture_index]
                     array_uvs.append(array_val)
-#                store(']];')
+                # store(']];')
 
                 # Flip UV normals
                 store("""
@@ -368,23 +401,24 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 # Add the mesh to the node's group
                 store('node_{}.add(mesh);'.format(parent_node))
-                
+
                 # Blender - Create an object with the node's id
                 mesh = bpy.data.meshes.new(str(obj_name))
-                object = bpy.data.objects.new(str(obj_name), mesh)
-                # Put the object in a collection
-                bpy.data.collections[filename].objects.link(object)
+                object = bpy.context.scene.objects[str(obj_name)]
+                object.data = mesh
+
                 # Set the location and rotation of the object
-                object.location = [mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z]
-                #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y,
+                                   mesh_data.frames[0].origin.z))
+                # object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
-                mesh.from_pydata(array_verts_all,[],array_faces)
+                mesh.from_pydata(array_verts_all, [], array_faces)
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
-                ob = bpy.context.scene.objects[str(obj_name)]       # Get the object
-                bpy.ops.object.select_all(action='DESELECT') # Deselect all objects
-                bpy.context.view_layer.objects.active = ob   # Make the desired object the active object 
-                ob.select_set(True)                          # Select the object                
+                ob = bpy.context.scene.objects[str(obj_name)]  # Get the object
+                bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
+                bpy.context.view_layer.objects.active = ob  # Make the desired object the active object
+                ob.select_set(True)  # Select the object
                 # Create the face maps
                 x = 0
                 while (x < material_count):
@@ -394,15 +428,15 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     x += 1
                 # Switch object modes, not sure why we have to go into edit mode and than back to object mode
                 ob = bpy.context.active_object
-                bpy.ops.object.mode_set(mode = 'EDIT') 
+                bpy.ops.object.mode_set(mode='EDIT')
                 bpy.ops.mesh.select_mode(type="FACE")
-                bpy.ops.mesh.select_all(action = 'DESELECT')
-                bpy.ops.object.mode_set(mode = 'OBJECT')
+                bpy.ops.mesh.select_all(action='DESELECT')
+                bpy.ops.object.mode_set(mode='OBJECT')
                 # Loop through all faces and assign to face map and assign material
                 x = 0
                 for k in ob.data.polygons:
                     ob.data.polygons[x].select = True
-                    bpy.ops.object.mode_set(mode = 'EDIT')
+                    bpy.ops.object.mode_set(mode='EDIT')
                     ob.face_maps.active_index = int(array_faces_material[x])
                     bpy.ops.object.face_map_assign()
                     # Assign material
@@ -410,7 +444,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     bpy.ops.object.material_slot_assign()
                     # Deselect faces so their mapping doesn't change
                     bpy.ops.object.face_map_deselect()
-                    bpy.ops.object.mode_set(mode = 'OBJECT')
+                    bpy.ops.object.mode_set(mode='OBJECT')
                     x += 1
 
                 # Create the UV map
@@ -446,8 +480,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             store('folder_seq.open();')
 
-
-
             # Create the sequences
 
             # TODO: HANDLE IFL SEQUENCES
@@ -466,7 +498,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             node_id = 0
             for node in nodes:
-                if node.num_subsequences: # TODO: LODs
+                if node.num_subsequences:  # TODO: LODs
                     subseq = subsequences[node.first_subsequence]
                     store("""
             const animationGroup_node{} = new THREE.AnimationObjectGroup();
@@ -480,14 +512,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         """.format(node_id))
                     store('[')
                     for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                        store('{}, '.format(keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
+                        store('{}, '.format(
+                            keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
                     store(']')
 
                     store(', [')
                     for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                         trans = transforms[keyframes[key].key_value]
                         store('{}, {}, {}, {}, '.format(
-                            short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
+                            short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z),
+                            short2float(trans.rotate.w)
                         ))
                     store(']);')
 
@@ -498,7 +532,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
             //clipAction_node{n_id}.play();
             mixers.push(mixer_node{n_id});
-                    """.format(n_id=node_id, seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'), duration=shape_data.sequences[subseq.sequence_index].duration))
+                    """.format(n_id=node_id,
+                               seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'),
+                               duration=shape_data.sequences[subseq.sequence_index].duration))
                 node_id += 1
 
             # Create the power sequence
@@ -530,7 +566,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                             is_lod_shape = True
                             lod = int(second_name)
 
-                    if node.num_subsequences and lod == 15: # TODO: LODs
+                    if node.num_subsequences and lod == 15:  # TODO: LODs
                         subseq = subsequences[node.first_subsequence]
                         if subseq.sequence_index == seq_id:
                             store("""
@@ -545,14 +581,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                 """.format(node_id))
                             store('[')
                             for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                store('{}, '.format(shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
+                                store('{}, '.format(
+                                    shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
                             store(']')
 
                             store(', [')
                             for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                                 trans = transforms[shape_data.keyframes[key].key_value]
                                 store('{}, {}, {}, {}, '.format(
-                                    short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
+                                    short2float(trans.rotate.x), short2float(trans.rotate.y),
+                                    short2float(trans.rotate.z), short2float(trans.rotate.w)
                                 ))
                             store(']);')
 
@@ -563,7 +601,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
             clipAction_node{n_id}.play();
             mixers.push(mixer_node{n_id});
-                            """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'), duration=shape_data.sequences[seq_id].duration))
+                            """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'),
+                                       duration=shape_data.sequences[seq_id].duration))
                     node_id += 1
-                    
+
         return {'FINISHED'}
