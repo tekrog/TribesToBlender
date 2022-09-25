@@ -6,6 +6,7 @@ import pprint
 
 import bpy
 import bmesh
+import mathutils
 from bpy import ops
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty, FloatProperty
@@ -39,9 +40,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     return 0
                 return float(short) / float(0x7FFF)
 
-            def create_nodes(node: Dts.Node, nodes, transforms, node_tree):
-                store('var node_{} = new THREE.Group();'.format(node.id))
-
+            def create_nodes(node: Dts.Node, nodes, transforms, node_tree, names):
+#                store('var node_{} = new THREE.Group();'.format(node.id))
+                # Blender - Create an object with the node's id
+                object = bpy.data.objects.new(names[node].name], None)
+                
                 def_trans = transforms[nodes[node.id].default_transform]
                 if nodes[node.id].parent == -1:
 #                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
@@ -49,8 +52,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
  #                   ))
                     store('group.add(node_{});'.format(node.id))
-                    # Create an object with the node's id
-                    object = bpy.data.objects.new(str(node.id), None)
+                    # Blender
                     bpy.data.collections[filename].objects.link(object)
                     object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
                     object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
@@ -67,14 +69,18 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
 
 ## Fix translation
-                    # Create an object with the node's id
-                    object = bpy.data.objects.new(str(node.id), None)
+                    # Blender
                     bpy.data.collections[filename].objects.link(object)
-                    object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+                    vec = mathutils.Vector((def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                    inv = object.matrix_world.copy()
+                    inv.invert()
+                    vec_rot = vec @ inv
+                    object.location = object.location + vec_rot
                     object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                    object.parent = bpy.context.scene.objects['node_' + str(nodes[node.id].parent)]
 
                 for child in node_tree[node.id]:
-                    create_nodes(nodes[child], nodes, transforms, node_tree)
+                    create_nodes(nodes[child], nodes, transforms, node_tree, names)
 
             #file_path = "./shapes/indoorgun.DTS"
 
@@ -205,7 +211,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 # Set up the node hierarchy
                 for child in node_tree[0]:
-                    create_nodes(nodes[child], nodes, transforms, node_tree)
+                    create_nodes(nodes[child], nodes, transforms, node_tree, names)
 
             else:
                 print("Shape was not of TS::Shape")
@@ -307,22 +313,22 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                             """)
 
                 # Texture vertices
-                store('textureVerts = [')
+#                store('textureVerts = [')
                 for vert in mesh_data.texture_vertices:
-                    store('new THREE.Vector2({}, {}),'.format(
-                        vert.x, vert.y
-                    ))
-                    # Blender - Put all the texture vertices in an array of [x, y]
-                    array_val = [vert.x, vert.y]
+#                    store('new THREE.Vector2({}, {}),'.format(
+#                        vert.x, vert.y
+#                    ))
+                    # Blender - Put all the texture vertices in an array of [x, 1-y]. Blender uses a different texture space coordinate.
+                    array_val = [vert.x, 1-vert.y]
                     array_texvert.append(array_val)
-                store('];')
+#                store('];')
 
                 # Set up UVs
-                store('geometry.faceVertexUvs = [[')
+#                store('geometry.faceVertexUvs = [[')
                 for face in mesh_data.faces:
-                    store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
-                        face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
-                    ))
+#                    store(' [ textureVerts[{}], textureVerts[{}], textureVerts[{}] ],'.format(
+#                        face.vip[0].texture_index, face.vip[1].texture_index, face.vip[2].texture_index
+#                    ))
                     # Blender - Look up texture vertices from face indices
                     array_val = array_texvert[face.vip[0].texture_index]
                     array_uvs.append(array_val)
@@ -330,7 +336,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     array_uvs.append(array_val)
                     array_val = array_texvert[face.vip[2].texture_index]
                     array_uvs.append(array_val)
-                store(']];')
+#                store(']];')
 
                 # Flip UV normals
                 store("""
