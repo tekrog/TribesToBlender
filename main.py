@@ -25,7 +25,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
         filename = self.filepath.split('/')[-1].split('.')[0]
         path = self.filepath
-
+        
         # Collection created, but not used yet
         obj_collection = bpy.data.collections.new(filename)
         context.scene.collection.children.link(obj_collection)
@@ -192,14 +192,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     bpy.data.collections[filename].objects.link(object)
 
                 # Set up nodes' parents
+                array_parents = []
                 for node in nodes:
                     object = bpy.context.scene.objects[str(names[node.name])]
                     if node.parent != -1:
                         print(str(names[node.name]), '->', str(names[nodes[node.parent].name]))
                         parent = bpy.context.scene.objects[str(names[nodes[node.parent].name])]
                         object.parent = parent
+                        array_val = [str(names[node.name]), str(names[nodes[node.parent].name])]
+                        array_parents.append(array_val)
 
-                print()
                 for obj in objects:
                     if str(names[obj.name]) not in bpy.context.scene.objects:
                         print(str(names[obj.name]), '->', str(names[nodes[obj.node_index].name]))
@@ -207,6 +209,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         parent = bpy.context.scene.objects[str(names[nodes[obj.node_index].name])]
                         object.parent = parent
                         bpy.data.collections[filename].objects.link(object)
+                        array_val = [str(names[obj.name]), str(names[nodes[obj.node_index].name])]
+                        array_parents.append(array_val)
 
 
                 # Start with the roots, which come from the LODs
@@ -314,6 +318,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         vert.x, vert.y, vert.z
                     ))
                     # Blender - Put all the vertices in an array of [x, y, z]
+#                    array_val = [vert.x * mesh_data.frames[0].scale.x, vert.y * mesh_data.frames[0].scale.y, vert.z * mesh_data.frames[0].scale.z]
                     array_val = [vert.x, vert.y, vert.z]
                     array_verts_all.append(array_val)
 
@@ -408,8 +413,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 object.data = mesh
 
                 # Set the location and rotation of the object
-                object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y,
-                                   mesh_data.frames[0].origin.z))
+                object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
                 # object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
                 mesh.from_pydata(array_verts_all, [], array_faces)
@@ -451,7 +455,18 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 new_uv = ob.data.uv_layers.new(name='UV Map')
                 for loop in ob.data.loops:
                     new_uv.data[loop.index].uv = array_uvs[loop.index]
-
+            
+            # Parent all the objects
+            x = 0
+            for obj in array_parents:
+                print(str(array_parents[x][0]), '->', str(array_parents[x][1]))
+                bpy.ops.object.select_all(action='DESELECT')
+                bpy.context.view_layer.objects.active = bpy.context.scene.objects[str(array_parents[x][1])] 
+                bpy.context.scene.objects[str(array_parents[x][1])].select_set(True)
+                bpy.context.scene.objects[str(array_parents[x][0])].select_set(True)
+                bpy.ops.object.parent_set(type='OBJECT')
+                x += 1
+                
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
             store("""
