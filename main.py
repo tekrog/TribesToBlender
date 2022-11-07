@@ -17,9 +17,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
     bl_label = "Import Starsiege: Tribes .dts"
     bl_description = 'Imports Starsiege: Tribes .dts file.'
 
-    filter_glob: StringProperty(default="*.dts", options={'HIDDEN'})
+    filter_glob : StringProperty(default="*.dts", options={'HIDDEN'})
     filename_ext = ".dts"
-
+    
     def execute(self, context):
         import re
 
@@ -35,49 +35,37 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #                print(str)
                 with open(out_path, 'a') as f:
                     f.write(str + "\n")
-
+                
             def short2float(short):
                 if short == 0:
                     return 0
                 return float(short) / float(0x7FFF)
 
-            def create_nodes(node: Dts.Node, nodes, transforms, node_tree, names):
+            def create_nodes(node: Dts.Node, nodes, transforms, node_tree):
                 store('var node_{} = new THREE.Group();'.format(node.id))
-                object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
 
                 def_trans = transforms[nodes[node.id].default_transform]
                 if nodes[node.id].parent == -1:
-#                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-#                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-#                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-#                   ))
+                    store('node_{}.position.set({}, {}, {});'.format(node.id, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                    ))
                     store('group.add(node_{});'.format(node.id))
-                    # Create an object with the node's id
-                    object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
-                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
-                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-
                 else:
-# store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
-#                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
-#                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
-#                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
-#                    store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
-#                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
-#                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-#                    ))
-#                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
-
-                    ## Fix translation
-                    # Create an object with the node's id
-                    object.location += object.parent.location + mathutils.Vector((def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-                    object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
-                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                    #store('console.log(node_{}.quaternion);'.format(nodes[node.id].parent))
+                    store('node_{}.translateX({});'.format(node.id, def_trans.translate.x))
+                    store('node_{}.translateY({});'.format(node.id, def_trans.translate.y))
+                    store('node_{}.translateZ({});'.format(node.id, def_trans.translate.z))
+                    store('node_{}.applyQuaternion(node_{}.quaternion);'.format(node.id, nodes[node.id].parent))
+                    store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}).invert());'.format(
+                        node.id, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                    ))
+                    store('node_{}.add(node_{});'.format(nodes[node.id].parent, node.id))
 
                 for child in node_tree[node.id]:
-                    create_nodes(nodes[child], nodes, transforms, node_tree, names)
+                    create_nodes(nodes[child], nodes, transforms, node_tree)
 
-            # file_path = "./shapes/indoorgun.DTS"
+            #file_path = "./shapes/indoorgun.DTS"
 
             out_path = filename + ".html"
 
@@ -87,7 +75,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 #            with open('header.html', 'r') as f:
 #                with open(out_path, 'w') as g:
 #                    g.write(f.read())
-
+            
             d = Dts.from_file(path)
 
             MAX_VAL = float(0x7FFF)
@@ -182,35 +170,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     for node2 in range(0, len(nodes)):
                         if nodes[node2].parent == j:
                             node_tree[j].append(node2)
-                # pprint.pprint(node_tree)
-
-
-                # Blender - Create Objects for all objects, with dummy meshes
-                for node in nodes:
-                    print(str(names[node.name]))
-                    object = bpy.data.objects.new(str(names[node.name]), bpy.data.meshes.new(str(names[node.name])))
-                    bpy.data.collections[filename].objects.link(object)
-
-                # Set up nodes' parents
-                array_parents = []
-                for node in nodes:
-                    object = bpy.context.scene.objects[str(names[node.name])]
-                    if node.parent != -1:
-                        print(str(names[node.name]), '->', str(names[nodes[node.parent].name]))
-                        parent = bpy.context.scene.objects[str(names[nodes[node.parent].name])]
-                        object.parent = parent
-                        array_val = [str(names[node.name]), str(names[nodes[node.parent].name])]
-                        array_parents.append(array_val)
-
-                for obj in objects:
-                    if str(names[obj.name]) not in bpy.context.scene.objects:
-                        print(str(names[obj.name]), '->', str(names[nodes[obj.node_index].name]))
-                        object = bpy.data.objects.new(str(names[obj.name]), bpy.data.meshes.new(str(names[obj.name])))
-                        parent = bpy.context.scene.objects[str(names[nodes[obj.node_index].name])]
-                        object.parent = parent
-                        bpy.data.collections[filename].objects.link(object)
-                        array_val = [str(names[obj.name]), str(names[nodes[obj.node_index].name])]
-                        array_parents.append(array_val)
+                #pprint.pprint(node_tree)
 
 
                 # Start with the roots, which come from the LODs
@@ -219,35 +179,48 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 for lod_idx in range(0, len(shape_data.details)):
                     if nodes[lod_idx].parent != -1:
                         needed_parents.add(nodes[lod_idx].parent)
-                # print(needed_parents)
+                #print(needed_parents)
 
                 # Root node (bounds)
                 store('var node_0 = new THREE.Group();')
-                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x,
-                                                                transforms[nodes[0].default_transform].translate.y,
-                                                                transforms[nodes[0].default_transform].translate.z))
+                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
                 store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                    short2float(transforms[nodes[0].default_transform].rotate.x),
-                    short2float(transforms[nodes[0].default_transform].rotate.y),
-                    short2float(transforms[nodes[0].default_transform].rotate.z),
-                    short2float(transforms[nodes[0].default_transform].rotate.w)
+                    short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
                 ))
                 store('group.add(node_0);')
-                # Blender - Create an object with the root node's name
-                # object = bpy.data.objects.new(str(names[nodes[0].name]), None)
-                # bpy.data.collections[filename].objects.link(object)
-                # object.location = [transforms[nodes[0].default_transform].translate.x,
-                #                    transforms[nodes[0].default_transform].translate.y,
-                #                    transforms[nodes[0].default_transform].translate.z]
-                # object.rotation_quaternion = [short2float(transforms[nodes[0].default_transform].rotate.x),
-                #                               short2float(transforms[nodes[0].default_transform].rotate.y),
-                #                               short2float(transforms[nodes[0].default_transform].rotate.z),
-                #                               short2float(transforms[nodes[0].default_transform].rotate.w)]
 
                 # Set up the node hierarchy
                 for child in node_tree[0]:
-                    create_nodes(nodes[child], nodes, transforms, node_tree, names)
+                    create_nodes(nodes[child], nodes, transforms, node_tree)
 
+
+
+                # Set up the node hierarchy
+                # for j in range(0, len(nodes)):
+                #     store('var node_{} = new THREE.Group();'.format(j))
+
+                #     def_trans = transforms[nodes[j].default_transform]
+                #     parent_trans = transforms[nodes[j].parent]
+                #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+                #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #     #))
+
+                #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #         ))
+                #         store('group.add(node_{});'.format(j))
+                #     else:
+                #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
+                #         ))
+                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+                #         ))
+                #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
             else:
                 print("Shape was not of TS::Shape")
                 sys.exit(1)
@@ -261,6 +234,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 }});""".format(lod.root_node_index, lod.size))
                 store('node_{}.visible = false;'.format(lod.root_node_index))
             store('lods[0].node.visible = true;')
+
 
             # Add meshes
             print('meshes')
@@ -302,8 +276,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 # if is_hulk or lod != 15:#128:#15:
                 #    continue
 
-                if is_hulk or is_debris:
-                    continue
+#                if is_hulk or is_debris:
+#                    continue
 
                 if len(mesh_data.faces) == 0:
                     continue
@@ -409,12 +383,17 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 # Blender - Create an object with the node's id
                 mesh = bpy.data.meshes.new(str(obj_name))
+                object = bpy.data.objects.new(str(obj_name), mesh)
+                bpy.data.collections[filename].objects.link(object)
                 object = bpy.context.scene.objects[str(obj_name)]
                 object.data = mesh
-
+                # Move Blender 3d cursor to object's pivot point, then set object pivot to 3d cursor
+                bpy.context.scene.cursor.location = (transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
+                bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+                
                 # Set the location and rotation of the object
                 object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
-                # object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
                 mesh.from_pydata(array_verts_all, [], array_faces)
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
@@ -455,18 +434,42 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 new_uv = ob.data.uv_layers.new(name='UV Map')
                 for loop in ob.data.loops:
                     new_uv.data[loop.index].uv = array_uvs[loop.index]
-            
-            # Parent all the objects
+
+            # Blender - Create Objects for all nodes, with dummy meshes, find parents
+            array_parents = []   
+            for node in nodes:
+                obj = bpy.context.scene.objects.get(str(names[node.name]))
+                if not obj:
+                    object = bpy.data.objects.new(str(names[node.name]), None)
+                    bpy.data.collections[filename].objects.link(object)
+                if node.parent != -1:
+                    array_val = [str(names[node.name]), str(names[nodes[node.parent].name])]
+                    array_parents.append(array_val)
+                    
+            # Blender - Find parents for all objects
+            for obj in objects:
+                array_val = [str(names[obj.name]), str(names[nodes[obj.node_index].name])]
+                array_parents.append(array_val)
+                        
+            # Blender - Parent all the objects
             x = 0
             for obj in array_parents:
-                print(str(array_parents[x][0]), '->', str(array_parents[x][1]))
+                #print(str(array_parents[x][0]), '->', str(array_parents[x][1]))
                 bpy.ops.object.select_all(action='DESELECT')
                 bpy.context.view_layer.objects.active = bpy.context.scene.objects[str(array_parents[x][1])] 
                 bpy.context.scene.objects[str(array_parents[x][1])].select_set(True)
                 bpy.context.scene.objects[str(array_parents[x][0])].select_set(True)
                 bpy.ops.object.parent_set(type='OBJECT')
                 x += 1
-                
+                    
+            # Blender - Move the nodes
+            for node in nodes:
+                def_trans = transforms[nodes[node.id].default_transform]
+                object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
+                object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+                object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
+                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+            
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
             store("""
@@ -495,10 +498,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             store('folder_seq.open();')
 
+
+
             # Create the sequences
 
             # TODO: HANDLE IFL SEQUENCES
-
+#scene = bpy.data.scenes['Scene']
+#scene.timeline_markers.new('F_01', frame=1)
             subsequences = None
             keyframes = None
             if hasattr(shape_data, 'subsequences'):
@@ -513,7 +519,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             node_id = 0
             for node in nodes:
-                if node.num_subsequences:  # TODO: LODs
+                if node.num_subsequences: # TODO: LODs
                     subseq = subsequences[node.first_subsequence]
                     store("""
             const animationGroup_node{} = new THREE.AnimationObjectGroup();
@@ -527,16 +533,14 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         """.format(node_id))
                     store('[')
                     for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                        store('{}, '.format(
-                            keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
+                        store('{}, '.format(keyframes[key].position * shape_data.sequences[subseq.sequence_index].duration))
                     store(']')
 
                     store(', [')
                     for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                         trans = transforms[keyframes[key].key_value]
                         store('{}, {}, {}, {}, '.format(
-                            short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z),
-                            short2float(trans.rotate.w)
+                            short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z), short2float(trans.rotate.w)
                         ))
                     store(']);')
 
@@ -547,9 +551,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
             //clipAction_node{n_id}.play();
             mixers.push(mixer_node{n_id});
-                    """.format(n_id=node_id,
-                               seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'),
-                               duration=shape_data.sequences[subseq.sequence_index].duration))
+                    """.format(n_id=node_id, seq_name=names[shape_data.sequences[subseq.sequence_index].name].decode('ascii'), duration=shape_data.sequences[subseq.sequence_index].duration))
                 node_id += 1
 
             # Create the power sequence
@@ -619,5 +621,5 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                             """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'),
                                        duration=shape_data.sequences[seq_id].duration))
                     node_id += 1
-
+                    
         return {'FINISHED'}
