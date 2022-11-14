@@ -393,6 +393,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 
                 # Set the location and rotation of the object
                 object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
+                object.rotation_mode = 'QUATERNION'
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
                 mesh.from_pydata(array_verts_all, [], array_faces)
@@ -467,8 +468,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 def_trans = transforms[nodes[node.id].default_transform]
                 object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
                 object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
-                object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y),
-                                                  short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+                object.rotation_quaternion = [short2float(def_trans.rotate.w), short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
             
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
@@ -503,7 +504,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             # Create the sequences
 
             # TODO: HANDLE IFL SEQUENCES
-#scene = bpy.data.scenes['Scene']
+            scene = bpy.data.scenes['Scene']
 #scene.timeline_markers.new('F_01', frame=1)
             subsequences = None
             keyframes = None
@@ -555,71 +556,82 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 node_id += 1
 
             # Create the power sequence
-            if b'power' in names:
-                # Find the sequence ID for the power sequence
-                seq_id = 0
-                for sequence in shape_data.sequences:
-                    if names[sequence.name] == b'power':
-                        break
-                    seq_id += 1
+#            if b'power' in names:
+            # Find the sequence ID for the power sequence
+            seq_id = 0
+            for sequence in shape_data.sequences:
+                if names[sequence.name] == b'power':
+                    break
+                seq_id += 1
 
-                # TODO: HANDLE IFL SEQUENCES
+            # TODO: HANDLE IFL SEQUENCES
 
-                subsequences = None
-                if hasattr(shape_data, 'subsequences'):
-                    subsequences = shape_data.subsequences
-                elif hasattr(shape_data, 'subsequences_v7'):
-                    subsequences = shape_data.subsequences_v7
+            subsequences = None
+            if hasattr(shape_data, 'subsequences'):
+                subsequences = shape_data.subsequences
+            elif hasattr(shape_data, 'subsequences_v7'):
+                subsequences = shape_data.subsequences_v7
 
-                # Find the node with a sequence that corresponds to it
-                node_id = 0
-                for node in nodes:
-                    lod = 0
-                    if b' ' in names[node.name]:
-                        lod_parts = names[node.name].split(b' ')
-                        second_name = lod_parts[len(lod_parts) - 1]
+            # Find the node with a sequence that corresponds to it
+            node_id = 0
+            for node in nodes:
+                lod = 0
+                if b' ' in names[node.name]:
+                    lod_parts = names[node.name].split(b' ')
+                    second_name = lod_parts[len(lod_parts) - 1]
 
-                        if second_name.decode('ascii').isnumeric():
-                            is_lod_shape = True
-                            lod = int(second_name)
+                    if second_name.decode('ascii').isnumeric():
+                        is_lod_shape = True
+                        lod = int(second_name)
 
-                    if node.num_subsequences and lod == 15:  # TODO: LODs
-                        subseq = subsequences[node.first_subsequence]
-                        if subseq.sequence_index == seq_id:
-                            store("""
-            const animationGroup_node{} = new THREE.AnimationObjectGroup();
-            animationGroup_node{}.add( node_{} );
-                            """.format(node_id, node_id, node_id))
-                            first_keyframe = subseq.first_keyframe
+#                if node.num_subsequences and lod == 15:  # TODO: LODs
+                if node.num_subsequences:  # TODO: LODs
+                    subseq = subsequences[node.first_subsequence]
+                    if subseq.sequence_index == seq_id:
+                        store("""
+        const animationGroup_node{} = new THREE.AnimationObjectGroup();
+        animationGroup_node{}.add( node_{} );
+                        """.format(node_id, node_id, node_id))
+                        first_keyframe = subseq.first_keyframe
 
-                            store("""
-            const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
-            '.quaternion', 
-                                """.format(node_id))
-                            store('[')
-                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                store('{}, '.format(
-                                    shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
-                            store(']')
+                        store("""
+        const quaternionKF_node{} = new THREE.QuaternionKeyframeTrack( 
+        '.quaternion', 
+                            """.format(node_id))
+                            
+                        store('[')
+                        #Blender
+                        blender_frame = 0
+                        object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
+                        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                            store('{}, '.format(
+                                shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
+#                            store(']')
 
-                            store(', [')
-                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                trans = transforms[shape_data.keyframes[key].key_value]
-                                store('{}, {}, {}, {}, '.format(
-                                    short2float(trans.rotate.x), short2float(trans.rotate.y),
-                                    short2float(trans.rotate.z), short2float(trans.rotate.w)
-                                ))
-                            store(']);')
 
-                            store("""
-            const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
+#                            store(', [')
+#                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                            trans = transforms[shape_data.keyframes[key].key_value]
+                            store('{}, {}, {}, {}, '.format(
+                                short2float(trans.rotate.x), short2float(trans.rotate.y),
+                                short2float(trans.rotate.z), short2float(trans.rotate.w)
+                            ))
+                            scene.frame_set(blender_frame) #Blender
+                            object.rotation_quaternion = [short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
+                            print([short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)])
+                            object.keyframe_insert(data_path="rotation_quaternion", index=-1)
+                            blender_frame += 1 #Blender
+                        store(']);')
 
-            let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
-            const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
-            clipAction_node{n_id}.play();
-            mixers.push(mixer_node{n_id});
-                            """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'),
-                                       duration=shape_data.sequences[seq_id].duration))
-                    node_id += 1
+                        store("""
+        const clip_node{n_id} = new THREE.AnimationClip( '{seq_name}', {duration}, [ quaternionKF_node{n_id} ] );
+
+        let mixer_node{n_id} = new THREE.AnimationMixer( animationGroup_node{n_id} );
+        const clipAction_node{n_id} = mixer_node{n_id}.clipAction( clip_node{n_id} );
+        clipAction_node{n_id}.play();
+        mixers.push(mixer_node{n_id});
+                        """.format(n_id=node_id, seq_name=names[shape_data.sequences[seq_id].name].decode('ascii'),
+                                   duration=shape_data.sequences[seq_id].duration))
+                node_id += 1
                     
         return {'FINISHED'}
