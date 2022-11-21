@@ -32,9 +32,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
         with open(path, 'r') as f:
             def store(str=''):
+                pass
 #                print(str)
-                with open(out_path, 'a') as f:
-                    f.write(str + "\n")
+#                with open(out_path, 'a') as f:
+#                    f.write(str + "\n")
                 
             def short2float(short):
                 if short == 0:
@@ -605,13 +606,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
                         for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                             store('{}, '.format(
-                                shape_data.keyframes[key].position * shape_data.sequences[seq_id].duration))
+                                keyframes[key].position * shape_data.sequences[seq_id].duration))
 #                            store(']')
 
 
 #                            store(', [')
 #                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                            trans = transforms[shape_data.keyframes[key].key_value]
+                            trans = transforms[keyframes[key].key_value]
                             store('{}, {}, {}, {}, '.format(
                                 short2float(trans.rotate.x), short2float(trans.rotate.y),
                                 short2float(trans.rotate.z), short2float(trans.rotate.w)
