@@ -772,7 +772,7 @@ class Dts(KaitaiStruct):
 
         def _read(self):
             self.name = self._io.read_u4le()
-            self.parent = self._io.read_u4le()
+            self.parent = self._io.read_s4le()
             self.num_subsequences = self._io.read_u4le()
             self.first_subsequence = self._io.read_u4le()
             self.default_transform = self._io.read_u4le()
