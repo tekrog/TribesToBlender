@@ -56,7 +56,7 @@ types:
       - id: name
         type: u2
       - id: parent
-        type: u2
+        type: s2
       - id: num_subsequences
         type: u2
       - id: first_subsequence
@@ -68,7 +68,7 @@ types:
       - id: name
         type: u4
       - id: parent
-        type: u4
+        type: s4
       - id: num_subsequences
         type: u4
       - id: first_subsequence

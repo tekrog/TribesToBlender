@@ -23,7 +23,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         import re
 
-        filename = self.filepath.split('/')[-1].split('.')[0]
+        filename = self.filepath.split(os.path.sep)[-1].split('.')[0]
         path = self.filepath
         
         # Collection created, but not used yet
@@ -107,7 +107,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                             bitmap_name.decode('ascii'))
 
                     # Blender - Create a new material based on the model name and material id
-                    mat = bpy.data.materials.new(filename.split('\\')[-1] + '.' + str(i))
+                    mat = bpy.data.materials.new(filename.split(os.path.sep)[-1] + '.' + str(i))
                     mat.use_nodes = True
                     nodes = mat.node_tree.nodes
                     # check alpha paramater, may need to flip 0 to 1, and 1 to 0
@@ -123,7 +123,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         shader_node.location = -400, 200
                         shader_node.select = True
                         # Create the path to the image based on the model path
-                        image_path = filename.rsplit('\\', 1)[0] + '\\' + bitmap_name.decode('ascii')
+                        image_path = os.path.dirname(self.filepath) + os.path.sep + bitmap_name.decode('ascii')
+                        print(image_path)
                         # Check if .png exists
                         if os.path.exists(image_path):
                             shader_node.image = bpy.data.images.load(image_path)
@@ -519,7 +520,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 keyframes = shape_data.keyframes_v7
 
 
-            # Find the sequence ID for the sequence
+            # Iterate through all sequences and generate key frames for each object participating in that sequence
             frame_id = 0
             for seq_id in range(len(shape_data.sequences)):
                 seq_name = names[shape_data.sequences[seq_id].name].decode('ascii')
@@ -543,7 +544,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                 object.rotation_quaternion = [short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
                                 object.keyframe_insert(data_path="rotation_quaternion", index=-1)
                                 blender_frame += 1 #Blender
-                            print('Object: {}, Sequence: {}, Num frames: {}'.format(object, seq_name, subseq.num_keyframes))
                             last_subseq_len = subseq.num_keyframes
 
                     node_id += 1
