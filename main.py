@@ -109,6 +109,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     # Blender - Create a new material based on the model name and material id
                     mat = bpy.data.materials.new(filename.split(os.path.sep)[-1] + '.' + str(i))
                     mat.use_nodes = True
+
+                    if param.flags & 0x1000 == 0x1000 or param.flags & 0x2000 == 0x2000:
+                        mat.blend_method = "BLEND"
+
                     nodes = mat.node_tree.nodes
                     # check alpha paramater, may need to flip 0 to 1, and 1 to 0
                     nodes["Principled BSDF"].inputs[0].default_value = (
@@ -124,7 +128,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         shader_node.select = True
                         # Create the path to the image based on the model path
                         image_path = os.path.dirname(self.filepath) + os.path.sep + bitmap_name.decode('ascii')
-                        print(image_path)
+
                         # Check if .png exists
                         if os.path.exists(image_path):
                             shader_node.image = bpy.data.images.load(image_path)
@@ -136,6 +140,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         # Link the image texture node to the color slot on the BSDF node
                         links = mat.node_tree.links
                         link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
+                        
+                        # Link the alpha input/output
+                        links.new(shader_node.outputs["Alpha"], nodes["Principled BSDF"].inputs[21])
 
                     textures.append('material_' + str(i))
                     # Blender - count materials, used for face maps
@@ -390,11 +397,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 object = bpy.context.scene.objects[str(obj_name)]
                 object.data = mesh
                 # Move Blender 3d cursor to object's pivot point, then set object pivot to 3d cursor
-                bpy.context.scene.cursor.location = (transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
+                bpy.context.scene.cursor.location = (0, 0, 0) #(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
                 bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
                 
                 # Set the location and rotation of the object
-                object.location = object.location + mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
+                object.location = mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
                 object.rotation_mode = 'QUATERNION'
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
@@ -531,20 +538,25 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 last_subseq_len = 0
                 for node in nodes:
                     if node.num_subsequences:  # TODO: LODs
-                        subseq = subsequences[node.first_subsequence]
-                        if subseq.sequence_index == seq_id:
-                            first_keyframe = subseq.first_keyframe
 
-                            #Blender
-                            blender_frame = frame_id
-                            object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
-                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                trans = transforms[keyframes[key].key_value]
-                                scene.frame_set(blender_frame) #Blender
-                                object.rotation_quaternion = [short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
-                                object.keyframe_insert(data_path="rotation_quaternion", index=-1)
-                                blender_frame += 1 #Blender
-                            last_subseq_len = subseq.num_keyframes
+                        # A node may have multiple subsequences, go through all of them
+                        for subseq_count in range(node.num_subsequences):
+                            subseq = subsequences[node.first_subsequence + subseq_count]
+                            if subseq.sequence_index == seq_id:
+                                first_keyframe = subseq.first_keyframe
+
+                                #Blender
+                                blender_frame = frame_id
+                                object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
+                                for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                    trans = transforms[keyframes[key].key_value]
+                                    scene.frame_set(blender_frame) #Blender
+                                    object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
+                                    object.rotation_quaternion = [short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
+                                    object.keyframe_insert(data_path="rotation_quaternion", index=-1)
+                                    object.keyframe_insert(data_path="location", index=-1)
+                                    blender_frame += 1 #Blender
+                                last_subseq_len = subseq.num_keyframes
 
                     node_id += 1
                 frame_id += last_subseq_len
