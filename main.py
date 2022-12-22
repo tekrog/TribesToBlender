@@ -398,6 +398,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 object.data = mesh
                 # Move Blender 3d cursor to object's pivot point, then set object pivot to 3d cursor
                 bpy.context.scene.cursor.location = (0, 0, 0) #(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
+                bpy.context.scene.cursor.rotation_quaternion = (1, 0, 0, 0)
+                bpy.context.scene.cursor.rotation_euler = (0, 0, 0)
                 bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
                 
                 # Set the location and rotation of the object
@@ -478,7 +480,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
                 object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-                object.rotation_quaternion = [short2float(def_trans.rotate.w), short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
+                object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
             
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
@@ -552,7 +554,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                     trans = transforms[keyframes[key].key_value]
                                     scene.frame_set(blender_frame) #Blender
                                     object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
-                                    object.rotation_quaternion = [short2float(trans.rotate.w), short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
+                                    object.rotation_quaternion = [short2float(trans.rotate.w) * -1, short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
                                     object.keyframe_insert(data_path="rotation_quaternion", index=-1)
                                     object.keyframe_insert(data_path="location", index=-1)
                                     blender_frame += 1 #Blender
