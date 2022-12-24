@@ -131,7 +131,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 # Assume meshes can only have one subsequence
                 subseq = subsequences[obj.first_subsequence]
                 seq = subseq.sequence_index
-                seq_name = str(names[sequences[seq].name])
+                seq_name = names[sequences[seq].name]
                 print('Seq:', seq_name)
                 scene.timeline_markers.new(seq_name, frame=frame_id)
 
@@ -140,7 +140,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 isMaterialTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_MATERIAL_TRACK
                 isVisibilityTrack = keyframes[first_keyframe].mat_index & FLAG_VISIBILITY_TRACK
 
-                object = bpy.context.scene.objects[str(names[obj.name])]
+                object = bpy.context.scene.objects[names[obj.name]]
                 if isFrameTrackKeyframe:
                     print('Frame track!!!')
                     # Frame 0 is the Basis, keyframes start with frame 1
@@ -344,7 +344,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 shape_data: Dts.TsShape = d.shape.data.obj_data
 
                 for name in shape_data.names:
-                    names.append(name[:name.find(b'\0')])
+                    names.append(name[:name.find(b'\0')].decode('ascii'))
 
                 if hasattr(shape_data, 'objects'):
                     objects = shape_data.objects
@@ -528,13 +528,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             obj_id = 0
             mesh_data: Dts.TsAnimmesh
             for mesh_data in d.meshes:
-                is_debris = False
-                is_lod_shape = False
-                is_hulk = False
                 lod = 0
                 obj = objects[obj_id]
                 obj_name = names[objects[obj_id].name]
-                print(str(obj_name))
+                print(obj_name)
                 parent_node = objects[obj_id].node_index
                 array_verts_all = []  # Blender
                 array_faces = []  # Blender
@@ -547,36 +544,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 elif hasattr(mesh_data, 'frames_v2'):
                     frames = mesh_data.frames_v2
 
-                if b'debris' in obj_name:
-                    is_debris = True
-                elif b' ' in obj_name:
-                    lod_parts = obj_name.split(b' ')
-                    second_name = lod_parts[len(lod_parts) - 1]
-
-                    if second_name.decode('ascii').isnumeric():
-                        is_lod_shape = True
-                        lod = int(second_name)
-
-                if b'hulk' in obj_name:
-                    is_hulk = True
-
                 obj_id += 1
-                # if not is_lod_shape and not is_debris:
-                #    continue
-
-                # TEMP TODO: Toggle LODs and hulks
-                # if is_hulk or lod != 15:#128:#15:
-                #    continue
-
-#                if is_hulk or is_debris:
-#                    continue
 
                 if len(mesh_data.faces) == 0:
                     continue
-
-                store()
-                store('//{}'.format(obj_name))
-                store('geometry = new THREE.Geometry();')
 
                 # Vertices
                 # Add only vertices from Frame 0, this will be our Basis
@@ -673,10 +644,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 store('node_{}.add(mesh);'.format(parent_node))
 
                 # Blender - Create an object with the node's id
-                mesh = bpy.data.meshes.new(str(obj_name))
-                object = bpy.data.objects.new(str(obj_name), mesh)
+                mesh = bpy.data.meshes.new(obj_name)
+                object = bpy.data.objects.new(obj_name, mesh)
                 bpy.data.collections[filename].objects.link(object)
-                object = bpy.context.scene.objects[str(obj_name)]
+                object = bpy.context.scene.objects[obj_name]
                 object.data = mesh
                 # Move Blender 3d cursor to object's pivot point, then set object pivot to 3d cursor
                 bpy.context.scene.cursor.location = (0, 0, 0) #(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
@@ -695,7 +666,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
-                ob = bpy.context.scene.objects[str(obj_name)]  # Get the object
+                ob = bpy.context.scene.objects[obj_name]  # Get the object
                 bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
                 bpy.context.view_layer.objects.active = ob  # Make the desired object the active object
                 ob.select_set(True)  # Select the object
@@ -734,18 +705,18 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             # Blender - Create Objects for all nodes, with dummy meshes, find parents
             array_parents = []   
             for node in nodes:
-                obj = bpy.context.scene.objects.get(str(names[node.name]))
+                obj = bpy.context.scene.objects.get(names[node.name])
                 if not obj:
-                    object = bpy.data.objects.new(str(names[node.name]), None)
+                    object = bpy.data.objects.new(names[node.name], None)
                     object.rotation_mode = 'QUATERNION'
                     bpy.data.collections[filename].objects.link(object)
                 if node.parent != -1:
-                    array_val = [str(names[node.name]), str(names[nodes[node.parent].name])]
+                    array_val = [names[node.name], names[nodes[node.parent].name]]
                     array_parents.append(array_val)
                     
             # Blender - Find parents for all objects
             for obj in objects:
-                array_val = [str(names[obj.name]), str(names[nodes[obj.node_index].name])]
+                array_val = [names[obj.name], names[nodes[obj.node_index].name]]
                 array_parents.append(array_val)
                         
             # Blender - Parent all the objects
@@ -753,16 +724,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             for obj in array_parents:
                 #print(str(array_parents[x][0]), '->', str(array_parents[x][1]))
                 bpy.ops.object.select_all(action='DESELECT')
-                bpy.context.view_layer.objects.active = bpy.context.scene.objects[str(array_parents[x][1])] 
-                bpy.context.scene.objects[str(array_parents[x][1])].select_set(True)
-                bpy.context.scene.objects[str(array_parents[x][0])].select_set(True)
+                bpy.context.view_layer.objects.active = bpy.context.scene.objects[array_parents[x][1]] 
+                bpy.context.scene.objects[array_parents[x][1]].select_set(True)
+                bpy.context.scene.objects[array_parents[x][0]].select_set(True)
                 bpy.ops.object.parent_set(type='OBJECT')
                 x += 1
                     
             # Blender - Move the nodes
             for node in nodes:
                 def_trans = transforms[nodes[node.id].default_transform]
-                object = bpy.context.scene.objects[str(names[nodes[node.id].name])]
+                object = bpy.context.scene.objects[names[nodes[node.id].name]]
                 object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
@@ -789,7 +760,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             for sequence in shape_data.sequences:
                 # store(str(names[sequence.name]))
-                seq_name_ascii = names[sequence.name].decode('ascii')
+                seq_name_ascii = names[sequence.name]
                 store('_sequences["{}"] = true;'.format(seq_name_ascii))
                 store('folder_seq.add(_sequences, "{}");'.format(seq_name_ascii))
 
@@ -803,7 +774,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             # Iterate through all sequences and generate key frames for each object participating in that sequence
             for seq_id in range(len(shape_data.sequences)):
                 sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
-                seq_name = names[sequence.name].decode('ascii')
+                seq_name = names[sequence.name]
                 print(seq_name)
                 scene.timeline_markers.new(seq_name, frame=frame_id)
 
