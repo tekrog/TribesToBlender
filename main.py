@@ -12,15 +12,36 @@ from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty, FloatProperty
 
 
+'''
+Keyframe matIndex flags:
+if( visible )
+    fMatIndex |= 0x8000;
+if( visMatters )        // Uses visibility track
+    fMatIndex |= 0x4000;
+if( matMatters )        // Uses material track
+    fMatIndex |= 0x2000;
+if( frameMatters )      // Uses frame track
+    fMatIndex |= 0x1000;
+
+Material index: fMatIndex & 0x0fff
+'''
+FLAG_FRAME_TRACK = 0x1000
+FLAG_MATERIAL_TRACK = 0x2000
+FLAG_VISIBILITY_TRACK = 0x4000
+
+frame_id = 0
+
+
 class ImportDTS(bpy.types.Operator, ImportHelper):
     bl_idname = "dynamix.dts"
     bl_label = "Import Starsiege: Tribes .dts"
     bl_description = 'Imports Starsiege: Tribes .dts file.'
 
     filter_glob : StringProperty(default="*.dts", options={'HIDDEN'})
-    filename_ext = ".dts"
+    filename_ext = ".dts"    
     
     def execute(self, context):
+        global frame_id
         import re
 
         filename = self.filepath.split(os.path.sep)[-1].split('.')[0]
@@ -65,6 +86,87 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 for child in node_tree[node.id]:
                     create_nodes(nodes[child], nodes, transforms, node_tree)
+
+
+            def animate_meshes(mesh, obj, names, keyframes, sequences, subsequences, scene):
+                global frame_id
+
+                if hasattr(mesh, 'frames'):
+                    frames = mesh.frames
+                elif hasattr(mesh, 'frames_v2'):
+                    frames = mesh.frames_v2
+
+                # Objects only have sequences if they have more than one frame on the mesh
+                if len(frames) == 1:
+                    print('{} has no frames'.format(names[obj.name]))
+                    return
+
+                # Assume meshes can only have one subsequence
+                subseq = subsequences[obj.first_subsequence]
+                seq = subseq.sequence_index
+                seq_name = str(names[sequences[seq].name])
+                print('Seq:', seq_name)
+                scene.timeline_markers.new(seq_name, frame=frame_id)
+
+                first_keyframe = subseq.first_keyframe
+                isFrameTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_FRAME_TRACK
+                isMaterialTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_MATERIAL_TRACK
+                isVisibilityTrack = keyframes[first_keyframe].mat_index & FLAG_VISIBILITY_TRACK
+
+                object = bpy.context.scene.objects[str(names[obj.name])]
+                if isFrameTrackKeyframe:
+                    print('Frame track!!!')
+                    # Frame 0 is the Basis, keyframes start with frame 1
+                    first_vert = frames[0].first_vert
+                    sk_basis = object.shape_key_add(name='Basis', from_mix=False)
+                    sk_basis.interpolation = 'KEY_LINEAR'
+                    object.data.shape_keys.use_relative = True
+
+                    sks = []
+                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                        frametrack_key = keyframes[key].key_value
+
+                        # Create new shape key
+                        sk = object.shape_key_add(name='Frame {}'.format(frametrack_key), from_mix=False)
+                        sk.interpolation = 'KEY_LINEAR'
+
+                        start_vertex = frames[frametrack_key].first_vert
+                        for vrt_idx in range(mesh.num_vertices_per_frame):
+                            sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
+                            sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
+                            sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
+                        sk.value = 0
+                        sk.keyframe_insert(data_path="value", index=-1)
+                        sks.append(sk)
+                    
+                    prev_sk = None
+                    for sk_idx in range(len(sks)):
+                        scene.frame_set(frame_id)
+
+                        # Set prev frame back to zero
+                        if prev_sk is not None:
+                            prev_sk.value = 0
+                            prev_sk.keyframe_insert(data_path="value", index=-1)
+
+                        # Set current frame to 1
+                        sks[sk_idx].value = 1
+                        sks[sk_idx].keyframe_insert(data_path="value", index=-1)
+
+                        # Queue up next frame, setting it to zero, so there's no automatic transition to 1
+                        if sk_idx != len(sks) - 1:
+                            sks[sk_idx + 1].value = 0
+                            sks[sk_idx + 1].keyframe_insert(data_path="value", index=-1)
+
+                        prev_sk = sks[sk_idx]
+                        frame_id += 1
+
+                elif isMaterialTrackKeyframe:
+                    print('Material track!!!')
+                elif isVisibilityTrack:
+                    print('Visibility track!!!')
+                else:
+                    print('Transform track!!!')
+
 
             #file_path = "./shapes/indoorgun.DTS"
 
@@ -255,6 +357,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 is_lod_shape = False
                 is_hulk = False
                 lod = 0
+                obj = objects[obj_id]
                 obj_name = names[objects[obj_id].name]
                 print(str(obj_name))
                 parent_node = objects[obj_id].node_index
@@ -263,6 +366,21 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 array_faces_material = []  # Blender
                 array_texvert = []  # Blender
                 array_uvs = []  # Blender
+
+                if hasattr(mesh_data, 'frames'):
+                    frames = mesh_data.frames
+                elif hasattr(mesh_data, 'frames_v2'):
+                    frames = mesh_data.frames_v2
+
+                if hasattr(shape_data, 'keyframes'):
+                    keyframes = shape_data.keyframes
+                elif hasattr(shape_data, 'keyframes_v7'):
+                    keyframes = shape_data.keyframes_v7
+
+                if hasattr(shape_data, 'subsequences'):
+                    subsequences = shape_data.subsequences
+                elif hasattr(shape_data, 'subsequences_v7'):
+                    subsequences = shape_data.subsequences_v7
 
                 if b'debris' in obj_name:
                     is_debris = True
@@ -296,13 +414,12 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 store('geometry = new THREE.Geometry();')
 
                 # Vertices
-                for vert in mesh_data.vertices:
-                    store('geometry.vertices.push( new THREE.Vector3( {}, {}, {} ) );'.format(
-                        vert.x, vert.y, vert.z
-                    ))
+                # Add only vertices from Frame 0, this will be our Basis
+                start_vertex = frames[0].first_vert
+                for vrt_idx in range(mesh_data.num_vertices_per_frame):
                     # Blender - Put all the vertices in an array of [x, y, z]
 #                    array_val = [vert.x * mesh_data.frames[0].scale.x, vert.y * mesh_data.frames[0].scale.y, vert.z * mesh_data.frames[0].scale.z]
-                    array_val = [vert.x, vert.y, vert.z]
+                    array_val = [mesh_data.vertices[start_vertex + vrt_idx].x, mesh_data.vertices[start_vertex + vrt_idx].y, mesh_data.vertices[start_vertex + vrt_idx].z]
                     array_verts_all.append(array_val)
 
                 # Faces
@@ -408,6 +525,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
                 mesh.from_pydata(array_verts_all, [], array_faces)
+
+                animate_meshes(mesh_data, obj, names, keyframes, shape_data.sequences, subsequences, bpy.data.scenes['Scene'])
+
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
                 ob = bpy.context.scene.objects[str(obj_name)]  # Get the object
@@ -531,7 +651,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
 
             # Iterate through all sequences and generate key frames for each object participating in that sequence
-            frame_id = 0
+            #frame_id = 0
             for seq_id in range(len(shape_data.sequences)):
                 seq_name = names[shape_data.sequences[seq_id].name].decode('ascii')
                 scene.timeline_markers.new(seq_name, frame=frame_id)
