@@ -453,6 +453,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 obj = bpy.context.scene.objects.get(str(names[node.name]))
                 if not obj:
                     object = bpy.data.objects.new(str(names[node.name]), None)
+                    object.rotation_mode = 'QUATERNION'
                     bpy.data.collections[filename].objects.link(object)
                 if node.parent != -1:
                     array_val = [str(names[node.name]), str(names[nodes[node.parent].name])]
