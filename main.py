@@ -3,6 +3,7 @@ import sys
 import os
 import os.path
 import pprint
+import re
 
 import bpy
 import bmesh
@@ -186,7 +187,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             nodes = []
             objects = []
             textures = []
+            mapFiles = []
+            iflTextures = []
             transforms = []
+            pngORbmp = ""
             node_tree = {}
 
             store('var geometry = null;')
@@ -199,20 +203,26 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             if d.has_materials and d.materials:
                 material_count = 0
                 i = 0
+                    
+                # Make a list of mapFiles, needed for IFL sequences
                 for param in d.materials.params:
                     bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
-                    texture = None
-                    if len(bitmap_name):
-                        bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
-                        bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
-                        texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(
-                            bitmap_name.decode('ascii'))
+                    mapFiles.append(bitmap_name.decode('ascii'))
+                        
+                for param in d.materials.params:
+                    bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
+                    #texture = None
+                    #if len(bitmap_name):
+                    #    bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
+                    #    bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
+                    #   texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(
+                    #       bitmap_name.decode('ascii'))
 
                     # Blender - Create a new material based on the model name and material id
                     mat = bpy.data.materials.new(filename.split(os.path.sep)[-1] + '.' + str(i))
                     mat.use_nodes = True
 
-                    if param.flags & 0x1000 == 0x1000 or param.flags & 0x2000 == 0x2000:
+                    if param.flags & 0x1000 == 0x1000 or param.flags & 0x2000 == 0x2000 or param.flags == 0x2103 or param.flags == 0x2403:
                         mat.blend_method = "BLEND"
 
                     nodes = mat.node_tree.nodes
@@ -223,7 +233,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     if len(bitmap_name):
                         store('map: {},'.format('texture_' + str(i)))
                         store('transparent: true,')
-
+                        
+                        bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
+                        bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
+                        
                         # Blender - Create the image texture node
                         shader_node = nodes.new("ShaderNodeTexImage")
                         shader_node.location = -400, 200
@@ -234,17 +247,40 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         # Check if .png exists
                         if os.path.exists(image_path):
                             shader_node.image = bpy.data.images.load(image_path)
+                            pngORbmp = ".png"
                         # Check if .bmp exists
                         else:
                             image_path = image_path.rsplit('.', 1)[0] + ".bmp"
                             if os.path.exists(image_path):
                                 shader_node.image = bpy.data.images.load(image_path)
+                                pngORbmp = ".bmp"
                         # Link the image texture node to the color slot on the BSDF node
                         links = mat.node_tree.links
                         link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
                         
                         # Link the alpha input/output
                         links.new(shader_node.outputs["Alpha"], nodes["Principled BSDF"].inputs[21])
+                        
+                        if os.path.exists(image_path):
+                            # Support for IFL sequences
+                            if param.flags == 0x103 or param.flags == 0x2103 or param.flags == 0x2403:
+                                # Get the base name of the texture used in the IFL sequence
+                                origMapFile = re.search(r'^[a-zA-Z_]+', bitmap_name.decode('ascii'))
+                                for x in mapFiles:
+                                    # Get the current texture in the list, strip it down to just the name so it can be compared
+                                    currentMapFile = re.search(r'^[a-zA-Z_]+', x)
+                                    # Compare the two texture names to see if they match, if they do, add them to a list to see how many textures are in the IFL sequence
+                                    # Skip any textures that do not exist. Some IFL sequences reference textures that do not exist.
+                                    if origMapFile and currentMapFile:
+                                        if (str(origMapFile[0]) == str(currentMapFile[0])) and os.path.exists(os.path.dirname(self.filepath) + os.path.sep + x[:-4] + pngORbmp):
+                                            iflTextures.append(x)
+                                shader_node.image = bpy.data.images.load(image_path)
+                                shader_node.image.source = 'SEQUENCE'
+                                shader_node.image_user.frame_offset = -1
+                                shader_node.image_user.frame_duration = len(iflTextures)
+                                shader_node.image_user.use_cyclic = True
+                                shader_node.image_user.use_auto_refresh = True
+                                iflTextures = []
 
                     textures.append('material_' + str(i))
                     # Blender - count materials, used for face maps
@@ -671,6 +707,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                 #Blender
                                 blender_frame = frame_id
                                 object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
+                                # Actions will be created for each object animated. Bones will need to be created to be used with armors.
+                                #object.animation_data_create() #
+                                #object.animation_data.action = bpy.data.actions.new(name=seq_name) #
                                 for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                                     trans = transforms[keyframes[key].key_value]
                                     scene.frame_set(blender_frame) #Blender
