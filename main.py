@@ -4,7 +4,7 @@ import os
 import os.path
 import pprint
 import re
-
+import math
 import bpy
 import bmesh
 import mathutils
@@ -64,6 +64,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     return 0
                 return float(short) / float(0x7FFF)
 
+            # Blender uses linear rgb
+            def srgb_to_linear_rgb(srgb: int) -> float:
+                srgb = srgb / 255
+                if srgb <= 0.04045:
+                    linear = srgb / 12.92
+                else:
+                    linear = math.pow((srgb + 0.055) / 1.055, 2.4)
+
+                return linear
+            
             def create_nodes(node: Dts.Node, nodes, transforms, node_tree):
                 store('var node_{} = new THREE.Group();'.format(node.id))
 
@@ -228,7 +238,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     nodes = mat.node_tree.nodes
                     # check alpha paramater, may need to flip 0 to 1, and 1 to 0
                     nodes["Principled BSDF"].inputs[0].default_value = (
-                    param.rgb.red, param.rgb.green, param.rgb.blue, param.alpha)
+                    srgb_to_linear_rgb(param.rgb.red), srgb_to_linear_rgb(param.rgb.green), srgb_to_linear_rgb(param.rgb.blue), param.alpha)
 
                     if len(bitmap_name):
                         store('map: {},'.format('texture_' + str(i)))
