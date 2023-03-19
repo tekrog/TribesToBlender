@@ -29,6 +29,22 @@ Material index: fMatIndex & 0x0fff
 FLAG_FRAME_TRACK = 0x1000
 FLAG_MATERIAL_TRACK = 0x2000
 FLAG_VISIBILITY_TRACK = 0x4000
+FLAG_IS_VISIBLE = 0x8000
+
+FLAG_MATTYPE_NULL = 0x0
+FLAG_MATTYPE_FLAGS = 0xF
+FLAG_MATTYPE_PALETTE = 0x1
+FLAG_MATTYPE_RGB = 0x2
+FLAG_MATTYPE_TEXTURE = 0x3
+
+FLAG_SHADING_FLAGS = 0xF00
+FLAG_SHADING_NONE = 0x100
+FLAG_SHADING_FLAT = 0x200
+FLAG_SHADING_SMOOTH = 0x400
+
+FLAG_TEXTURE_FLAGS = 0xF000
+FLAG_TEXTURE_TRANSPARENT = 0x1000
+FLAG_TEXTURE_TRANSLUCENT = 0x2000
 
 frame_id = 0
 
@@ -178,17 +194,134 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 else:
                     print('Transform track!!!')
 
+            def generate_ifl_materials(sequences, keyframes):
+                ifl_materials = {}
+                for seq_id in range(len(sequences)):
+                    sequence: Dts.VectorSequence = sequences[seq_id]
+                    seq_name = names[sequence.name].decode('ascii')
 
-            #file_path = "./shapes/indoorgun.DTS"
+                    # IFL subsequences
+                    if sequence.num_ifl_subsequences > 0:
+                        # A sequence may have multiple IFL subsequences, for different materials
+                        ifl_frame_id = 0
+                        for subseq_count in range(sequence.num_ifl_subsequences):
+                            subseq = subsequences[sequence.first_ifl_subsequence + subseq_count]
+                            first_keyframe = subseq.first_keyframe
 
-            out_path = filename + ".html"
+                            ifl_mat = bpy.data.materials.new(name='ifl_{}_{}'.format(seq_name, subseq_count))
+                            ifl_mat.use_nodes = True
+                            shader_nodes = ifl_mat.node_tree.nodes
+                            shader_links = ifl_mat.node_tree.links
 
-            if os.path.exists(out_path):
-                os.truncate(out_path, 0)
+                            if keyframes[first_keyframe].mat_index not in ifl_materials:
+                                ifl_materials[keyframes[first_keyframe].mat_index] = 'ifl_{}_{}'.format(seq_name, subseq_count)
 
-#            with open('header.html', 'r') as f:
-#                with open(out_path, 'w') as g:
-#                    g.write(f.read())
+                            # Texture nodes
+                            texture_nodes = []
+                            node_num = 0
+                            for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                # The material index represents the default material, while the key_value represents the new material to replace it with
+                                old_map = d.materials.params[keyframes[key].mat_index].map_file
+                                old_map = old_map[:old_map.find(b'\0')].decode('ascii')
+                                new_map = d.materials.params[keyframes[key].key_value].map_file
+                                new_map = new_map[:new_map.find(b'\0')].decode('ascii')
+                                print("Key:", key, "Material Idx:", keyframes[key].mat_index, "Map name:", old_map, "->", new_map)
+
+                                image_path = os.path.dirname(self.filepath) + os.path.sep + new_map
+                                image = None
+                                if os.path.exists(image_path):
+                                    image = bpy.data.images.load(image_path, check_existing=False)
+                                else:
+                                    image_path = image_path.rsplit('.', 1)[0] + ".png"
+                                    if os.path.exists(image_path):
+                                        image = bpy.data.images.load(image_path, check_existing=False)
+                                    else:
+                                        print("Missing image: {}".format(image_path))
+
+                                shader_node = shader_nodes.new("ShaderNodeTexImage")
+
+                                if image:
+                                    image.name = "sequence_{}_{}".format(seq_name, ifl_frame_id)
+                                    image.use_fake_user = True
+                                    shader_node.image = image
+                                    shader_node.image.source = "FILE"
+
+                                shader_node.location = node_num * 250, 100
+                                texture_nodes.append(shader_node)
+
+                                # print(bpy.data.images.get(image.name))
+                                ifl_frame_id += 1
+                                node_num += 1
+
+                            # Create mix and math nodes
+                            prev_mix_node_color = None
+                            prev_mix_node_alpha = None
+                            greater_nodes = []
+                            for mix_idx in range(len(texture_nodes) - 1):
+                                mix_node_color = shader_nodes.new("ShaderNodeMixRGB")
+                                mix_node_color.location = 300 + mix_idx * 250, 550
+
+                                mix_node_alpha = shader_nodes.new("ShaderNodeMixRGB")
+                                mix_node_alpha.location = 300 + mix_idx * 250, 350
+
+                                # Math node to toggle between the two textures
+                                math_node = shader_nodes.new("ShaderNodeMath")
+                                math_node.operation = "GREATER_THAN"
+                                math_node.inputs[1].default_value = mix_idx + 1  # Threshold
+                                math_node.location = 50 + mix_idx * 250, 750
+                                shader_links.new(math_node.outputs["Value"], mix_node_color.inputs["Fac"])
+                                shader_links.new(math_node.outputs["Value"], mix_node_alpha.inputs["Fac"])
+                                greater_nodes.append(math_node)
+
+                                # For the first mix node, use the first two textures
+                                if prev_mix_node_color is None:
+                                    shader_links.new(texture_nodes[mix_idx].outputs["Color"], mix_node_color.inputs["Color1"])
+                                    shader_links.new(texture_nodes[mix_idx + 1].outputs["Color"], mix_node_color.inputs["Color2"])
+
+                                    shader_links.new(texture_nodes[mix_idx].outputs["Alpha"], mix_node_alpha.inputs["Color1"])
+                                    shader_links.new(texture_nodes[mix_idx + 1].outputs["Alpha"], mix_node_alpha.inputs["Color2"])
+                                else:
+                                    # Otherwise, use the previous mix node and the next texture
+                                    shader_links.new(prev_mix_node_color.outputs["Color"], mix_node_color.inputs["Color1"])
+                                    shader_links.new(texture_nodes[mix_idx + 1].outputs["Color"], mix_node_color.inputs["Color2"])
+
+                                    shader_links.new(prev_mix_node_alpha.outputs["Color"], mix_node_alpha.inputs["Color1"])
+                                    shader_links.new(texture_nodes[mix_idx + 1].outputs["Alpha"], mix_node_alpha.inputs["Color2"])
+
+                                prev_mix_node_color = mix_node_color
+                                prev_mix_node_alpha = mix_node_alpha
+
+                            # Create an Add node that inputs into all of the "greater than" nodes
+                            add_node = shader_nodes.new("ShaderNodeMath")
+                            add_node.operation = "ADD"
+                            add_node.inputs[1].default_value = 0.01
+                            add_node.location = -150, 850
+                            for g_node in greater_nodes:
+                                shader_links.new(add_node.outputs["Value"], g_node.inputs["Value"])
+
+                            # Create an input value node for keyframing and attach it to the "Add" node
+                            input_node = shader_nodes.new("ShaderNodeValue")
+                            input_node.name = "IFL Input Value"
+                            input_node.location = -350, 850
+                            shader_links.new(input_node.outputs["Value"], add_node.inputs[0])
+
+                            # Link the final mix output to the BSDF
+                            bsdf_node = shader_nodes.get("Principled BSDF")
+                            bsdf_node.location = (len(texture_nodes) + 1) * 250, 100
+                            shader_links.new(prev_mix_node_color.outputs["Color"], bsdf_node.inputs["Base Color"])
+
+                            # Update the material's blend mode if there are alpha channels
+                            mat_flags = d.materials.params[keyframes[first_keyframe].key_value].flags
+                            if mat_flags & FLAG_TEXTURE_TRANSPARENT == FLAG_TEXTURE_TRANSPARENT or mat_flags & FLAG_TEXTURE_TRANSLUCENT == FLAG_TEXTURE_TRANSLUCENT:
+                                ifl_mat.blend_method = "BLEND"
+                                shader_links.new(prev_mix_node_alpha.outputs["Color"], bsdf_node.inputs["Alpha"])
+
+                            mat_out_node = shader_nodes.get("Material Output")
+                            mat_out_node.location = bsdf_node.location[0] + 300, bsdf_node.location[1]
+
+                return ifl_materials
+
+
             
             d = Dts.from_file(path)
 
@@ -198,107 +331,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             objects = []
             textures = []
             mapFiles = []
-            iflTextures = []
             transforms = []
             pngORbmp = ""
             node_tree = {}
 
-            store('var geometry = null;')
-            store('var mesh = null;')
-            store('var texture = null;')
-            store('var material = null;')
-            store('var textureVerts = null;')
 
-            # Load textures
-            if d.has_materials and d.materials:
-                material_count = 0
-                i = 0
-                    
-                # Make a list of mapFiles, needed for IFL sequences
-                for param in d.materials.params:
-                    bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
-                    mapFiles.append(bitmap_name.decode('ascii'))
-                        
-                for param in d.materials.params:
-                    bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
-                    #texture = None
-                    #if len(bitmap_name):
-                    #    bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
-                    #    bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
-                    #   texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(
-                    #       bitmap_name.decode('ascii'))
-
-                    # Blender - Create a new material based on the model name and material id
-                    mat = bpy.data.materials.new(filename.split(os.path.sep)[-1] + '.' + str(i))
-                    mat.use_nodes = True
-
-                    if param.flags & 0x1000 == 0x1000 or param.flags & 0x2000 == 0x2000 or param.flags == 0x2103 or param.flags == 0x2403:
-                        mat.blend_method = "BLEND"
-
-                    nodes = mat.node_tree.nodes
-                    # check alpha paramater, may need to flip 0 to 1, and 1 to 0
-                    nodes["Principled BSDF"].inputs[0].default_value = (
-                    srgb_to_linear_rgb(param.rgb.red), srgb_to_linear_rgb(param.rgb.green), srgb_to_linear_rgb(param.rgb.blue), param.alpha)
-
-                    if len(bitmap_name):
-                        store('map: {},'.format('texture_' + str(i)))
-                        store('transparent: true,')
-                        
-                        bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
-                        bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
-                        
-                        # Blender - Create the image texture node
-                        shader_node = nodes.new("ShaderNodeTexImage")
-                        shader_node.location = -400, 200
-                        shader_node.select = True
-                        # Create the path to the image based on the model path
-                        image_path = os.path.dirname(self.filepath) + os.path.sep + bitmap_name.decode('ascii')
-
-                        # Check if .png exists
-                        if os.path.exists(image_path):
-                            shader_node.image = bpy.data.images.load(image_path)
-                            pngORbmp = ".png"
-                        # Check if .bmp exists
-                        else:
-                            image_path = image_path.rsplit('.', 1)[0] + ".bmp"
-                            if os.path.exists(image_path):
-                                shader_node.image = bpy.data.images.load(image_path)
-                                pngORbmp = ".bmp"
-                        # Link the image texture node to the color slot on the BSDF node
-                        links = mat.node_tree.links
-                        link = links.new(shader_node.outputs["Color"], nodes["Principled BSDF"].inputs[0])
-                        
-                        # Link the alpha input/output
-                        links.new(shader_node.outputs["Alpha"], nodes["Principled BSDF"].inputs[21])
-                        
-                        if os.path.exists(image_path):
-                            # Support for IFL sequences
-                            if param.flags == 0x103 or param.flags == 0x2103 or param.flags == 0x2403:
-                                # Get the base name of the texture used in the IFL sequence
-                                origMapFile = re.search(r'^[a-zA-Z_]+', bitmap_name.decode('ascii'))
-                                for x in mapFiles:
-                                    # Get the current texture in the list, strip it down to just the name so it can be compared
-                                    currentMapFile = re.search(r'^[a-zA-Z_]+', x)
-                                    # Compare the two texture names to see if they match, if they do, add them to a list to see how many textures are in the IFL sequence
-                                    # Skip any textures that do not exist. Some IFL sequences reference textures that do not exist.
-                                    if origMapFile and currentMapFile:
-                                        if (str(origMapFile[0]) == str(currentMapFile[0])) and os.path.exists(os.path.dirname(self.filepath) + os.path.sep + x[:-4] + pngORbmp):
-                                            iflTextures.append(x)
-                                shader_node.image = bpy.data.images.load(image_path)
-                                shader_node.image.source = 'SEQUENCE'
-                                shader_node.image_user.frame_offset = -1
-                                shader_node.image_user.frame_duration = len(iflTextures)
-                                shader_node.image_user.use_cyclic = True
-                                shader_node.image_user.use_auto_refresh = True
-                                iflTextures = []
-
-                    textures.append('material_' + str(i))
-                    # Blender - count materials, used for face maps
-                    material_count += 1
-
-                    i += 1
-
-            # Make nodes
             if b'TS::Shape' in d.shape.data.classname:
                 shape_data: Dts.TsShape = d.shape.data.obj_data
 
@@ -320,67 +357,155 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 elif hasattr(shape_data, 'nodes_v7'):
                     nodes = shape_data.nodes_v7
 
-                # Create a dictionary of the nodes' children
-                for j in range(0, len(nodes)):
-                    node_tree[j] = []
-                    nodes[j].id = j  # Set an ID on the nodes so we can reference it later
-                    for node2 in range(0, len(nodes)):
-                        if nodes[node2].parent == j:
-                            node_tree[j].append(node2)
-                #pprint.pprint(node_tree)
+                if hasattr(shape_data, 'keyframes'):
+                    keyframes = shape_data.keyframes
+                elif hasattr(shape_data, 'keyframes_v7'):
+                    keyframes = shape_data.keyframes_v7
 
-
-                # Start with the roots, which come from the LODs
-                # Find any needed parents for the roots. Should only be the bounds box (0)
-                needed_parents = set()
-                for lod_idx in range(0, len(shape_data.details)):
-                    if nodes[lod_idx].parent != -1:
-                        needed_parents.add(nodes[lod_idx].parent)
-                #print(needed_parents)
-
-                # Root node (bounds)
-                store('var node_0 = new THREE.Group();')
-                store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
-                store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                    short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
-                ))
-                store('group.add(node_0);')
-
-                # Set up the node hierarchy
-                for child in node_tree[0]:
-                    create_nodes(nodes[child], nodes, transforms, node_tree)
-
-
-
-                # Set up the node hierarchy
-                # for j in range(0, len(nodes)):
-                #     store('var node_{} = new THREE.Group();'.format(j))
-
-                #     def_trans = transforms[nodes[j].default_transform]
-                #     parent_trans = transforms[nodes[j].parent]
-                #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
-                #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #     #))
-
-                #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #         ))
-                #         store('group.add(node_{});'.format(j))
-                #     else:
-                #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
-                #         ))
-                #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
-                #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
-                #         ))
-                #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
+                sequences = shape_data.sequences
+                if hasattr(shape_data, 'subsequences'):
+                    subsequences = shape_data.subsequences
+                elif hasattr(shape_data, 'subsequences_v7'):
+                    subsequences = shape_data.subsequences_v7
             else:
                 print("Shape was not of TS::Shape")
                 sys.exit(1)
+
+
+
+            # Load textures
+            if d.has_materials and d.materials:
+                material_count = 0
+                i = 0
+
+                iflTextures = generate_ifl_materials(sequences, keyframes)
+                    
+                # Make a list of mapFiles, needed for IFL sequences
+                for param in d.materials.params:
+                    bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
+                    mapFiles.append(bitmap_name.decode('ascii'))
+                        
+                for param in d.materials.params:
+                    if i not in iflTextures:
+                        bitmap_name: bytes = param.map_file[:param.map_file.find(b'\0')]
+                        #texture = None
+                        #if len(bitmap_name):
+                        #    bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
+                        #    bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
+                        #   texture = 'const texture_' + str(i) + " = textureLoader.load('textures/{}')".format(
+                        #       bitmap_name.decode('ascii'))
+
+                        # Blender - Create a new material based on the model name and material id
+                        mat = bpy.data.materials.new(filename.split(os.path.sep)[-1] + '.' + str(i))
+                        mat.use_nodes = True
+
+                        if param.flags & FLAG_TEXTURE_TRANSPARENT == FLAG_TEXTURE_TRANSPARENT or param.flags & FLAG_TEXTURE_TRANSLUCENT == FLAG_TEXTURE_TRANSLUCENT:
+                            mat.blend_method = "BLEND"
+
+                        mat_nodes = mat.node_tree.nodes
+                        # check alpha paramater, may need to flip 0 to 1, and 1 to 0
+                        mat_nodes["Principled BSDF"].inputs[0].default_value = (
+                        srgb_to_linear_rgb(param.rgb.red), srgb_to_linear_rgb(param.rgb.green), srgb_to_linear_rgb(param.rgb.blue), param.alpha)
+
+                        if len(bitmap_name):
+                            store('map: {},'.format('texture_' + str(i)))
+                            store('transparent: true,')
+
+                            bitmap_name = bitmap_name.replace(b'.bmp', b'.png')
+                            bitmap_name = bitmap_name.replace(b'.BMP', b'.png')
+
+                            # Blender - Create the image texture node
+                            shader_node = mat_nodes.new("ShaderNodeTexImage")
+                            shader_node.location = -400, 200
+                            shader_node.select = True
+                            # Create the path to the image based on the model path
+                            image_path = os.path.dirname(self.filepath) + os.path.sep + bitmap_name.decode('ascii')
+
+                            # Check if .png exists
+                            if os.path.exists(image_path):
+                                shader_node.image = bpy.data.images.load(image_path)
+                                pngORbmp = ".png"
+                            # Check if .bmp exists
+                            else:
+                                image_path = image_path.rsplit('.', 1)[0] + ".bmp"
+                                if os.path.exists(image_path):
+                                    shader_node.image = bpy.data.images.load(image_path)
+                                    pngORbmp = ".bmp"
+                            # Link the image texture node to the color slot on the BSDF node
+                            links = mat.node_tree.links
+                            link = links.new(shader_node.outputs["Color"], mat_nodes["Principled BSDF"].inputs[0])
+
+                            # Link the alpha input/output
+                            links.new(shader_node.outputs["Alpha"], mat_nodes["Principled BSDF"].inputs[21])
+
+                        textures.append(mat.name)
+                    else:
+                        textures.append(iflTextures[i])
+
+                    # Blender - count materials, used for face maps
+                    material_count += 1
+                    i += 1
+
+            # Make nodes
+            # Create a dictionary of the nodes' children
+            for j in range(0, len(nodes)):
+                node_tree[j] = []
+                nodes[j].id = j  # Set an ID on the nodes so we can reference it later
+                for node2 in range(0, len(nodes)):
+                    if nodes[node2].parent == j:
+                        node_tree[j].append(node2)
+            #pprint.pprint(node_tree)
+
+
+            # Start with the roots, which come from the LODs
+            # Find any needed parents for the roots. Should only be the bounds box (0)
+            needed_parents = set()
+            for lod_idx in range(0, len(shape_data.details)):
+                if nodes[lod_idx].parent != -1:
+                    needed_parents.add(nodes[lod_idx].parent)
+            #print(needed_parents)
+
+            # Root node (bounds)
+            store('var node_0 = new THREE.Group();')
+            store('node_0.position.set({}, {}, {});'.format(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z))
+            store('node_0.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+                short2float(transforms[nodes[0].default_transform].rotate.x), short2float(transforms[nodes[0].default_transform].rotate.y), short2float(transforms[nodes[0].default_transform].rotate.z), short2float(transforms[nodes[0].default_transform].rotate.w)
+            ))
+            store('group.add(node_0);')
+
+            # Set up the node hierarchy
+            for child in node_tree[0]:
+                create_nodes(nodes[child], nodes, transforms, node_tree)
+
+
+
+            # Set up the node hierarchy
+            # for j in range(0, len(nodes)):
+            #     store('var node_{} = new THREE.Group();'.format(j))
+
+            #     def_trans = transforms[nodes[j].default_transform]
+            #     parent_trans = transforms[nodes[j].parent]
+            #     store('node_{}.position.set({}, {}, {});'.format(j, def_trans.translate.x, def_trans.translate.y, def_trans.translate.z))
+            #     #store('node_{}.setRotationFromQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+            #     #store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+            #     #    j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+            #     #))
+
+            #     if nodes[j].parent == -1: # or nodes[j].parent == 0xFFFFFFFF:
+            #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+            #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+            #         ))
+            #         store('group.add(node_{});'.format(j))
+            #     else:
+            #         #store('console.log(node_{}.quaternion);'.format(nodes[j].parent))
+            #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+            #             j, short2float(parent_trans.rotate.x), short2float(parent_trans.rotate.y), short2float(parent_trans.rotate.z), short2float(parent_trans.rotate.w)
+            #         ))
+            #         store('node_{}.applyQuaternion(new THREE.Quaternion({}, {}, {}, {}));'.format(
+            #             j, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)
+            #         ))
+            #         store('node_{}.add(node_{});'.format(nodes[j].parent, j))
+
 
             # Set up LoDs
             for lod in shape_data.details:
@@ -417,16 +542,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     frames = mesh_data.frames
                 elif hasattr(mesh_data, 'frames_v2'):
                     frames = mesh_data.frames_v2
-
-                if hasattr(shape_data, 'keyframes'):
-                    keyframes = shape_data.keyframes
-                elif hasattr(shape_data, 'keyframes_v7'):
-                    keyframes = shape_data.keyframes_v7
-
-                if hasattr(shape_data, 'subsequences'):
-                    subsequences = shape_data.subsequences
-                elif hasattr(shape_data, 'subsequences_v7'):
-                    subsequences = shape_data.subsequences_v7
 
                 if b'debris' in obj_name:
                     is_debris = True
@@ -541,7 +656,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 ))
 
                 # Create the mesh
-                store('mesh = new THREE.Mesh( geometry, [{}] );'.format(', '.join(textures)))
+                #store('mesh = new THREE.Mesh( geometry, [{}] );'.format(', '.join(textures)))
 
                 # Position the mesh
                 store('mesh.position.set({}, {}, {});'.format(
@@ -581,12 +696,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 bpy.context.view_layer.objects.active = ob  # Make the desired object the active object
                 ob.select_set(True)  # Select the object
                 # Create the face maps
-                x = 0
-                while (x < material_count):
+                for tex in textures:
                     bpy.ops.object.face_map_add()
-                    mat = bpy.data.materials.get(filename.split('\\')[-1] + '.' + str(x))
+                    mat = bpy.data.materials.get(tex)
                     object.data.materials.append(mat)
-                    x += 1
+
                 # Switch object modes, not sure why we have to go into edit mode and than back to object mode
                 ob = bpy.context.active_object
                 bpy.ops.object.mode_set(mode='EDIT')
@@ -680,57 +794,68 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
 
             # Create the sequences
-
-            # TODO: HANDLE IFL SEQUENCES
             scene = bpy.data.scenes['Scene']
-            subsequences = None
-            keyframes = None
-            if hasattr(shape_data, 'subsequences'):
-                subsequences = shape_data.subsequences
-            elif hasattr(shape_data, 'subsequences_v7'):
-                subsequences = shape_data.subsequences_v7
-
-            if hasattr(shape_data, 'keyframes'):
-                keyframes = shape_data.keyframes
-            elif hasattr(shape_data, 'keyframes_v7'):
-                keyframes = shape_data.keyframes_v7
-
 
             # Iterate through all sequences and generate key frames for each object participating in that sequence
-            #frame_id = 0
             for seq_id in range(len(shape_data.sequences)):
-                seq_name = names[shape_data.sequences[seq_id].name].decode('ascii')
+                sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
+                seq_name = names[sequence.name].decode('ascii')
+                print(seq_name)
                 scene.timeline_markers.new(seq_name, frame=frame_id)
 
-                # Find the node with a sequence that corresponds to it
-                node_id = 0
-                last_subseq_len = 0
-                for node in nodes:
-                    if node.num_subsequences:  # TODO: LODs
+                if sequence.num_ifl_subsequences > 0:
+                    # IFL sequence
+                    print("IFL sequence")
 
-                        # A node may have multiple subsequences, go through all of them
-                        for subseq_count in range(node.num_subsequences):
-                            subseq = subsequences[node.first_subsequence + subseq_count]
-                            if subseq.sequence_index == seq_id:
-                                first_keyframe = subseq.first_keyframe
+                    # A sequence may have multiple IFL subsequences, for different materials
+                    for subseq_count in range(sequence.num_ifl_subsequences):
+                        subseq = subsequences[sequence.first_ifl_subsequence + subseq_count]
+                        print('num key frames:', subseq.num_keyframes)
 
-                                #Blender
-                                blender_frame = frame_id
-                                object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
-                                # Actions will be created for each object animated. Bones will need to be created to be used with armors.
-                                #object.animation_data_create() #
-                                #object.animation_data.action = bpy.data.actions.new(name=seq_name) #
-                                for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                    trans = transforms[keyframes[key].key_value]
-                                    scene.frame_set(blender_frame) #Blender
-                                    object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
-                                    object.rotation_quaternion = [short2float(trans.rotate.w) * -1, short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
-                                    object.keyframe_insert(data_path="rotation_quaternion", index=-1)
-                                    object.keyframe_insert(data_path="location", index=-1)
-                                    blender_frame += 1 #Blender
-                                last_subseq_len = subseq.num_keyframes
+                        first_keyframe = subseq.first_keyframe
+                        ifl_mat = bpy.data.materials.get('ifl_{}_{}'.format(seq_name, subseq_count))
+                        value_node = ifl_mat.node_tree.nodes.get("IFL Input Value")
 
-                    node_id += 1
-                frame_id += last_subseq_len
+                        val = 0
+                        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                            value_node.outputs["Value"].default_value = val
+                            value_node.outputs["Value"].keyframe_insert(data_path="default_value", index=-1)
+                            scene.frame_set(frame_id)
+                            val += 1
+                            frame_id += 1
+
+                else:
+                    # Node sequence
+                    # Find the node with a sequence that corresponds to it
+                    node_id = 0
+                    last_subseq_len = 0
+                    for node in nodes:
+                        if node.num_subsequences:  # TODO: LODs
+
+                            # A node may have multiple subsequences, go through all of them
+                            for subseq_count in range(node.num_subsequences):
+                                subseq = subsequences[node.first_subsequence + subseq_count]
+                                if subseq.sequence_index == seq_id:
+                                    print('num key frames:', subseq.num_keyframes)
+                                    first_keyframe = subseq.first_keyframe
+
+                                    #Blender
+                                    blender_frame = frame_id
+                                    object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
+                                    # Actions will be created for each object animated. Bones will need to be created to be used with armors.
+                                    #object.animation_data_create() #
+                                    #object.animation_data.action = bpy.data.actions.new(name=seq_name) #
+                                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                        trans = transforms[keyframes[key].key_value]
+                                        scene.frame_set(blender_frame) #Blender
+                                        object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
+                                        object.rotation_quaternion = [short2float(trans.rotate.w) * -1, short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
+                                        object.keyframe_insert(data_path="rotation_quaternion", index=-1)
+                                        object.keyframe_insert(data_path="location", index=-1)
+                                        blender_frame += 1 #Blender
+                                    last_subseq_len = subseq.num_keyframes
+
+                        node_id += 1
+                    frame_id += last_subseq_len
                     
         return {'FINISHED'}
