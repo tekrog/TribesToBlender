@@ -228,20 +228,24 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                 print("Key:", key, "Material Idx:", keyframes[key].mat_index, "Map name:", old_map, "->", new_map)
 
                                 image_path = os.path.dirname(self.filepath) + os.path.sep + new_map
+                                image = None
                                 if os.path.exists(image_path):
                                     image = bpy.data.images.load(image_path, check_existing=False)
                                 else:
                                     image_path = image_path.rsplit('.', 1)[0] + ".png"
                                     if os.path.exists(image_path):
                                         image = bpy.data.images.load(image_path, check_existing=False)
-                                #print(image.name)
-                                image.name = "sequence_{}_{}".format(seq_name, ifl_frame_id)
-                                image.use_fake_user = True
-                                image.pack()
+                                    else:
+                                        print("Missing image: {}".format(image_path))
 
                                 shader_node = shader_nodes.new("ShaderNodeTexImage")
-                                shader_node.image = image
-                                shader_node.image.source = "FILE"
+
+                                if image:
+                                    image.name = "sequence_{}_{}".format(seq_name, ifl_frame_id)
+                                    image.use_fake_user = True
+                                    shader_node.image = image
+                                    shader_node.image.source = "FILE"
+
                                 shader_node.location = node_num * 250, 100
                                 texture_nodes.append(shader_node)
 
@@ -297,6 +301,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                             # Create an input value node for keyframing and attach it to the "Add" node
                             input_node = shader_nodes.new("ShaderNodeValue")
+                            input_node.name = "IFL Input Value"
                             input_node.location = -350, 850
                             shader_links.new(input_node.outputs["Value"], add_node.inputs[0])
 
@@ -789,53 +794,68 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
 
             # Create the sequences
-
-            # TODO: HANDLE IFL SEQUENCES
             scene = bpy.data.scenes['Scene']
 
             # Iterate through all sequences and generate key frames for each object participating in that sequence
-            #frame_id = 0
             for seq_id in range(len(shape_data.sequences)):
                 sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
                 seq_name = names[sequence.name].decode('ascii')
                 print(seq_name)
                 scene.timeline_markers.new(seq_name, frame=frame_id)
 
-                ifl_subseq = 0
                 if sequence.num_ifl_subsequences > 0:
-                    print(seq_name, "contains IFL")
-                    ifl_subseq = sequence.first_ifl_subsequence
+                    # IFL sequence
+                    print("IFL sequence")
 
-                # Find the node with a sequence that corresponds to it
-                node_id = 0
-                last_subseq_len = 0
-                for node in nodes:
-                    if node.num_subsequences:  # TODO: LODs
+                    # A sequence may have multiple IFL subsequences, for different materials
+                    for subseq_count in range(sequence.num_ifl_subsequences):
+                        subseq = subsequences[sequence.first_ifl_subsequence + subseq_count]
+                        print('num key frames:', subseq.num_keyframes)
 
-                        # A node may have multiple subsequences, go through all of them
-                        for subseq_count in range(node.num_subsequences):
-                            subseq = subsequences[node.first_subsequence + subseq_count]
-                            if subseq.sequence_index == seq_id:
-                                print('num key frames:', subseq.num_keyframes)
-                                first_keyframe = subseq.first_keyframe
+                        first_keyframe = subseq.first_keyframe
+                        ifl_mat = bpy.data.materials.get('ifl_{}_{}'.format(seq_name, subseq_count))
+                        value_node = ifl_mat.node_tree.nodes.get("IFL Input Value")
 
-                                #Blender
-                                blender_frame = frame_id
-                                object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
-                                # Actions will be created for each object animated. Bones will need to be created to be used with armors.
-                                #object.animation_data_create() #
-                                #object.animation_data.action = bpy.data.actions.new(name=seq_name) #
-                                for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                                    trans = transforms[keyframes[key].key_value]
-                                    scene.frame_set(blender_frame) #Blender
-                                    object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
-                                    object.rotation_quaternion = [short2float(trans.rotate.w) * -1, short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
-                                    object.keyframe_insert(data_path="rotation_quaternion", index=-1)
-                                    object.keyframe_insert(data_path="location", index=-1)
-                                    blender_frame += 1 #Blender
-                                last_subseq_len = subseq.num_keyframes
+                        val = 0
+                        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                            value_node.outputs["Value"].default_value = val
+                            value_node.outputs["Value"].keyframe_insert(data_path="default_value", index=-1)
+                            scene.frame_set(frame_id)
+                            val += 1
+                            frame_id += 1
 
-                    node_id += 1
-                frame_id += last_subseq_len
+                else:
+                    # Node sequence
+                    # Find the node with a sequence that corresponds to it
+                    node_id = 0
+                    last_subseq_len = 0
+                    for node in nodes:
+                        if node.num_subsequences:  # TODO: LODs
+
+                            # A node may have multiple subsequences, go through all of them
+                            for subseq_count in range(node.num_subsequences):
+                                subseq = subsequences[node.first_subsequence + subseq_count]
+                                if subseq.sequence_index == seq_id:
+                                    print('num key frames:', subseq.num_keyframes)
+                                    first_keyframe = subseq.first_keyframe
+
+                                    #Blender
+                                    blender_frame = frame_id
+                                    object = bpy.context.scene.objects[str(names[nodes[node_id].name])]
+                                    # Actions will be created for each object animated. Bones will need to be created to be used with armors.
+                                    #object.animation_data_create() #
+                                    #object.animation_data.action = bpy.data.actions.new(name=seq_name) #
+                                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                                        trans = transforms[keyframes[key].key_value]
+                                        scene.frame_set(blender_frame) #Blender
+                                        object.location = [trans.translate.x, trans.translate.y, trans.translate.z]
+                                        object.rotation_quaternion = [short2float(trans.rotate.w) * -1, short2float(trans.rotate.x), short2float(trans.rotate.y), short2float(trans.rotate.z)] #Blender
+                                        object.keyframe_insert(data_path="rotation_quaternion", index=-1)
+                                        object.keyframe_insert(data_path="location", index=-1)
+                                        blender_frame += 1 #Blender
+                                    last_subseq_len = subseq.num_keyframes
+
+                        node_id += 1
+                    frame_id += last_subseq_len
                     
         return {'FINISHED'}
