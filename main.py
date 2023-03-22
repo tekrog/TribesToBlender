@@ -218,6 +218,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                             # Texture nodes
                             texture_nodes = []
+                            ifl_sequence = []
                             node_num = 0
                             for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                                 # The material index represents the default material, while the key_value represents the new material to replace it with
@@ -228,30 +229,33 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                                 print("Key:", key, "Material Idx:", keyframes[key].mat_index, "Map name:", old_map, "->", new_map)
 
                                 image_path = os.path.dirname(self.filepath) + os.path.sep + new_map
-                                image = None
-                                if os.path.exists(image_path):
-                                    image = bpy.data.images.load(image_path, check_existing=False)
+                                image_path = image_path.rsplit('.', 1)[0] + ".png"
+                                ifl_sequence.append(image_path)
+
+                                # See if we've already made a texture node and re-use it
+                                for tex in texture_nodes:
+                                    if tex.image.filepath == image_path:
+                                        texture_nodes.append(tex)
+                                        break
                                 else:
-                                    image_path = image_path.rsplit('.', 1)[0] + ".png"
+                                    # Make a new texture shader
+                                    image = None
                                     if os.path.exists(image_path):
                                         image = bpy.data.images.load(image_path, check_existing=False)
                                     else:
                                         print("Missing image: {}".format(image_path))
 
-                                shader_node = shader_nodes.new("ShaderNodeTexImage")
+                                    shader_node = shader_nodes.new("ShaderNodeTexImage")
 
-                                if image:
-                                    image.name = "sequence_{}_{}".format(seq_name, ifl_frame_id)
-                                    image.use_fake_user = True
-                                    shader_node.image = image
-                                    shader_node.image.source = "FILE"
+                                    if image:
+                                        image.name = new_map  # "sequence_{}_{}".format(seq_name, ifl_frame_id)
+                                        image.use_fake_user = True
+                                        shader_node.image = image
+                                        shader_node.image.source = "FILE"
 
-                                shader_node.location = node_num * 250, 100
-                                texture_nodes.append(shader_node)
-
-                                # print(bpy.data.images.get(image.name))
-                                ifl_frame_id += 1
-                                node_num += 1
+                                    shader_node.location = node_num * 250, 100
+                                    texture_nodes.append(shader_node)
+                                    node_num += 1
 
                             # Create mix and math nodes
                             prev_mix_node_color = None
