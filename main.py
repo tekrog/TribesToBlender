@@ -24,7 +24,16 @@ if( matMatters )        // Uses material track
 if( frameMatters )      // Uses frame track
     fMatIndex |= 0x1000;
 
-Material index: fMatIndex & 0x0fff
+Material frame index: fMatIndex & 0x0fff
+pa->useTextures( &fTextureVerts[matFrameIndex*fnTextureVertsPerFrame] );
+
+
+v7 Keyframe matIndex is u4 instead of u2
+fMatIndex & 0x80000000
+fMatIndex & 0x40000000
+fMatIndex & 0x20000000
+fMatIndex & 0x10000000
+mat index = fMatIndex & 0x0fffffff
 '''
 FLAG_FRAME_TRACK = 0x1000
 FLAG_MATERIAL_TRACK = 0x2000
@@ -132,7 +141,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 subseq = subsequences[obj.first_subsequence]
                 seq = subseq.sequence_index
                 seq_name = names[sequences[seq].name]
-                print('Seq:', seq_name)
+                print('Seq:', seq_name, 'Subseq id:', obj.first_subsequence)
                 scene.timeline_markers.new(seq_name, frame=frame_id)
 
                 first_keyframe = subseq.first_keyframe
@@ -159,9 +168,18 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                         start_vertex = frames[frametrack_key].first_vert
                         for vrt_idx in range(mesh.num_vertices_per_frame):
+                            print('{}, {}, {} -> {}, {}, {}'.format(
+                                sk.data[vrt_idx].co.x,
+                                sk.data[vrt_idx].co.y,
+                                sk.data[vrt_idx].co.z,
+                                mesh.vertices[start_vertex + vrt_idx].x,
+                                mesh.vertices[start_vertex + vrt_idx].y,
+                                mesh.vertices[start_vertex + vrt_idx].z
+                            ))
                             sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
                             sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
                             sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
+                        print('=============')
                         sk.value = 0
                         sk.keyframe_insert(data_path="value", index=-1)
                         sks.append(sk)
@@ -187,18 +205,18 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         prev_sk = sks[sk_idx]
                         frame_id += 1
 
-                elif isMaterialTrackKeyframe:
+                if isMaterialTrackKeyframe:
                     print('Material track!!!')
-                elif isVisibilityTrack:
+                if isVisibilityTrack:
                     print('Visibility track!!!')
-                else:
+                if not isFrameTrackKeyframe and not isMaterialTrackKeyframe and not isVisibilityTrack:
                     print('Transform track!!!')
 
             def generate_ifl_materials(sequences, keyframes):
                 ifl_materials = {}
                 for seq_id in range(len(sequences)):
                     sequence: Dts.VectorSequence = sequences[seq_id]
-                    seq_name = names[sequence.name].decode('ascii')
+                    seq_name = names[sequence.name]
 
                     # IFL subsequences
                     if sequence.num_ifl_subsequences > 0:
@@ -338,6 +356,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             transforms = []
             pngORbmp = ""
             node_tree = {}
+            obj_dts_to_blender_map = {}
 
 
             if b'TS::Shape' in d.shape.data.classname:
@@ -528,7 +547,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             obj_id = 0
             mesh_data: Dts.TsAnimmesh
             for mesh_data in d.meshes:
-                lod = 0
                 obj = objects[obj_id]
                 obj_name = names[objects[obj_id].name]
                 print(obj_name)
@@ -544,9 +562,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 elif hasattr(mesh_data, 'frames_v2'):
                     frames = mesh_data.frames_v2
 
-                obj_id += 1
-
                 if len(mesh_data.faces) == 0:
+                    obj_id += 1
                     continue
 
                 # Vertices
@@ -646,8 +663,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 # Blender - Create an object with the node's id
                 mesh = bpy.data.meshes.new(obj_name)
                 object = bpy.data.objects.new(obj_name, mesh)
+                actual_object_name = object.name # Blender may append a .00x
                 bpy.data.collections[filename].objects.link(object)
-                object = bpy.context.scene.objects[obj_name]
+                object = bpy.context.scene.objects[actual_object_name]
+                obj_dts_to_blender_map[obj_id] = actual_object_name
                 object.data = mesh
                 # Move Blender 3d cursor to object's pivot point, then set object pivot to 3d cursor
                 bpy.context.scene.cursor.location = (0, 0, 0) #(transforms[nodes[0].default_transform].translate.x, transforms[nodes[0].default_transform].translate.y, transforms[nodes[0].default_transform].translate.z)
@@ -666,7 +685,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
-                ob = bpy.context.scene.objects[obj_name]  # Get the object
+                ob = bpy.context.scene.objects[actual_object_name]  # Get the object
                 bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
                 bpy.context.view_layer.objects.active = ob  # Make the desired object the active object
                 ob.select_set(True)  # Select the object
@@ -702,6 +721,8 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 for loop in ob.data.loops:
                     new_uv.data[loop.index].uv = array_uvs[loop.index]
 
+                obj_id += 1
+
             # Blender - Create Objects for all nodes, with dummy meshes, find parents
             array_parents = []   
             for node in nodes:
@@ -715,18 +736,25 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     array_parents.append(array_val)
                     
             # Blender - Find parents for all objects
-            for obj in objects:
-                array_val = [names[obj.name], names[nodes[obj.node_index].name]]
+            pprint.pp(obj_dts_to_blender_map)
+            for obj_id in range(len(objects)):
+                obj = objects[obj_id]
+                # Some objects don't get created in Blender (e.g. bounds)
+                if obj_id not in obj_dts_to_blender_map:
+                    continue
+
+                array_val = [obj_dts_to_blender_map[obj_id], names[nodes[obj.node_index].name]]
                 array_parents.append(array_val)
+                print(obj_id, obj_dts_to_blender_map[obj_id], obj.node_index, names[nodes[obj.node_index].name])
                         
             # Blender - Parent all the objects
             x = 0
             for obj in array_parents:
                 #print(str(array_parents[x][0]), '->', str(array_parents[x][1]))
                 bpy.ops.object.select_all(action='DESELECT')
-                bpy.context.view_layer.objects.active = bpy.context.scene.objects[array_parents[x][1]] 
-                bpy.context.scene.objects[array_parents[x][1]].select_set(True)
-                bpy.context.scene.objects[array_parents[x][0]].select_set(True)
+                bpy.context.view_layer.objects.active = bpy.context.scene.objects[array_parents[x][1]] # Parent
+                bpy.context.scene.objects[array_parents[x][1]].select_set(True) # Parent
+                bpy.context.scene.objects[array_parents[x][0]].select_set(True) # First child
                 bpy.ops.object.parent_set(type='OBJECT')
                 x += 1
                     
