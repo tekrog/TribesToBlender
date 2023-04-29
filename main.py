@@ -801,6 +801,16 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
             # Iterate through all sequences and generate key frames for each object participating in that sequence
             for seq_id in range(len(shape_data.sequences)):
+                # Before starting a sequence, reset all nodes to their default transform
+                for node in nodes:
+                    def_trans = transforms[nodes[node.id].default_transform]
+                    object = bpy.context.scene.objects[names[nodes[node.id].name]]
+                    object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+                    object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
+                    object.keyframe_insert(data_path="rotation_quaternion", index=-1)
+                    object.keyframe_insert(data_path="location", index=-1)
+                frame_id += 1
+
                 sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
                 seq_name = names[sequence.name]
                 print(seq_name)
@@ -813,7 +823,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     # A sequence may have multiple IFL subsequences, for different materials
                     for subseq_count in range(sequence.num_ifl_subsequences):
                         subseq = subsequences[sequence.first_ifl_subsequence + subseq_count]
-                        print('num key frames:', subseq.num_keyframes)
+                        #print('num key frames:', subseq.num_keyframes)
 
                         first_keyframe = subseq.first_keyframe
                         ifl_mat = bpy.data.materials.get('ifl_{}_{}'.format(seq_name, subseq_count))
@@ -833,13 +843,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     node_id = 0
                     last_subseq_len = 0
                     for node in nodes:
-                        if node.num_subsequences:  # TODO: LODs
+                        if node.num_subsequences:
 
                             # A node may have multiple subsequences, go through all of them
                             for subseq_count in range(node.num_subsequences):
                                 subseq = subsequences[node.first_subsequence + subseq_count]
                                 if subseq.sequence_index == seq_id:
-                                    print('num key frames:', subseq.num_keyframes)
+                                    #print('num key frames:', subseq.num_keyframes)
                                     first_keyframe = subseq.first_keyframe
 
                                     #Blender
@@ -860,5 +870,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                         node_id += 1
                     frame_id += last_subseq_len
+                scene.timeline_markers.new('End of {}'.format(seq_name), frame=frame_id)
                     
         return {'FINISHED'}
