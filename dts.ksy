@@ -164,19 +164,19 @@ types:
       - id: name
         type: s2
       - id: flags
-        type: u2
+        type: s2
       - id: mesh_index
         type: s4
       - id: node_index
         type: s2
+      - id: dummy
+        type: u2
       - id: object_offset
         type: point3f
       - id: num_subsequences
-        type: u2
+        type: s2
       - id: first_subsequence
-        type: u2
-      - id: dummy
-        type: u2
+        type: s2
   objectv7:
     seq:
       - id: name
@@ -712,4 +712,3 @@ types:
         type: material_params
         repeat: expr
         repeat-expr: num_materials
-

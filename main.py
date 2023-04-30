@@ -127,6 +127,10 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             def animate_meshes(mesh, obj, names, keyframes, sequences, subsequences, scene):
                 global frame_id
 
+                if not obj.num_subsequences:
+                    print("Object has no subsequences to animate")
+                    return
+
                 if hasattr(mesh, 'frames'):
                     frames = mesh.frames
                 elif hasattr(mesh, 'frames_v2'):
@@ -549,7 +553,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             for mesh_data in d.meshes:
                 obj = objects[obj_id]
                 obj_name = names[objects[obj_id].name]
-                print(obj_name)
+                print('Object ID: {}, Name: {}'.format(obj_id, obj_name))
                 parent_node = objects[obj_id].node_index
                 array_verts_all = []  # Blender
                 array_faces = []  # Blender

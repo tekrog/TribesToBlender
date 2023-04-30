@@ -144,13 +144,13 @@ class Dts(KaitaiStruct):
 
         def _read(self):
             self.name = self._io.read_s2le()
-            self.flags = self._io.read_u2le()
+            self.flags = self._io.read_s2le()
             self.mesh_index = self._io.read_s4le()
             self.node_index = self._io.read_s2le()
-            self.object_offset = Dts.Point3f(self._io, self, self._root)
-            self.num_subsequences = self._io.read_u2le()
-            self.first_subsequence = self._io.read_u2le()
             self.dummy = self._io.read_u2le()
+            self.object_offset = Dts.Point3f(self._io, self, self._root)
+            self.num_subsequences = self._io.read_s2le()
+            self.first_subsequence = self._io.read_s2le()
 
 
     class Surface(KaitaiStruct):
