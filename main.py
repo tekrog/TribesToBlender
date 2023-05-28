@@ -124,7 +124,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     create_nodes(nodes[child], nodes, transforms, node_tree)
 
 
-            def animate_meshes(mesh, obj, names, keyframes, sequences, subsequences, scene):
+            def animate_meshes(object, mesh, obj, names, keyframes, sequences, subsequences, scene, scene_sequences):
                 global frame_id
 
                 if not obj.num_subsequences:
@@ -141,80 +141,116 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     print('{} has no frames'.format(names[obj.name]))
                     return
 
-                # Assume meshes can only have one subsequence
-                subseq = subsequences[obj.first_subsequence]
-                seq = subseq.sequence_index
-                seq_name = names[sequences[seq].name]
-                print('Seq:', seq_name, 'Subseq id:', obj.first_subsequence)
-                scene.timeline_markers.new(seq_name, frame=frame_id)
+                for subseq_count in range(obj.num_subsequences):
+                    subseq = subsequences[obj.first_subsequence + subseq_count]
+                    seq = subseq.sequence_index
+                    seq_name = names[sequences[seq].name]
+                    print('Seq:', seq_name, 'Subseq id:', obj.first_subsequence)
 
-                first_keyframe = subseq.first_keyframe
-                isFrameTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_FRAME_TRACK
-                isMaterialTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_MATERIAL_TRACK
-                isVisibilityTrack = keyframes[first_keyframe].mat_index & FLAG_VISIBILITY_TRACK
-
-                object = bpy.context.scene.objects[names[obj.name]]
-                if isFrameTrackKeyframe:
-                    print('Frame track!!!')
-                    # Frame 0 is the Basis, keyframes start with frame 1
-                    first_vert = frames[0].first_vert
-                    sk_basis = object.shape_key_add(name='Basis', from_mix=False)
-                    sk_basis.interpolation = 'KEY_LINEAR'
-                    object.data.shape_keys.use_relative = True
-
-                    sks = []
-                    for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
-                        frametrack_key = keyframes[key].key_value
-
-                        # Create new shape key
-                        sk = object.shape_key_add(name='Frame {}'.format(frametrack_key), from_mix=False)
-                        sk.interpolation = 'KEY_LINEAR'
-
-                        start_vertex = frames[frametrack_key].first_vert
-                        for vrt_idx in range(mesh.num_vertices_per_frame):
-                            print('{}, {}, {} -> {}, {}, {}'.format(
-                                sk.data[vrt_idx].co.x,
-                                sk.data[vrt_idx].co.y,
-                                sk.data[vrt_idx].co.z,
-                                mesh.vertices[start_vertex + vrt_idx].x,
-                                mesh.vertices[start_vertex + vrt_idx].y,
-                                mesh.vertices[start_vertex + vrt_idx].z
-                            ))
-                            sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
-                            sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
-                            sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
-                        print('=============')
-                        sk.value = 0
-                        sk.keyframe_insert(data_path="value", index=-1)
-                        sks.append(sk)
-                    
-                    prev_sk = None
-                    for sk_idx in range(len(sks)):
+                    if seq_name not in scene_sequences:
+                        print('Sequence not seen. Setting "{}" to frame {}'.format(seq_name, frame_id))
+                        scene_sequences[seq_name] = frame_id
+                        scene.timeline_markers.new(seq_name, frame=frame_id)
+                    else:
+                        frame_id = scene_sequences[seq_name]
                         scene.frame_set(frame_id)
 
-                        # Set prev frame back to zero
-                        if prev_sk is not None:
-                            prev_sk.value = 0
-                            prev_sk.keyframe_insert(data_path="value", index=-1)
+                    first_keyframe = subseq.first_keyframe
+                    isFrameTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_FRAME_TRACK
+                    isMaterialTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_MATERIAL_TRACK
+                    isVisibilityTrack = keyframes[first_keyframe].mat_index & FLAG_VISIBILITY_TRACK
 
-                        # Set current frame to 1
-                        sks[sk_idx].value = 1
-                        sks[sk_idx].keyframe_insert(data_path="value", index=-1)
+                    #object = bpy.context.scene.objects[names[obj.name]]
+                    if isFrameTrackKeyframe:
+                        print('Frame track!!!')
 
-                        # Queue up next frame, setting it to zero, so there's no automatic transition to 1
-                        if sk_idx != len(sks) - 1:
-                            sks[sk_idx + 1].value = 0
-                            sks[sk_idx + 1].keyframe_insert(data_path="value", index=-1)
+                        # Dummy frame
+                        # object.keyframe_insert(data_path="location", index=-1, frame=frame_id)
+                        # frame_id += 1
+                        # scene.frame_set(frame_id)
 
-                        prev_sk = sks[sk_idx]
-                        frame_id += 1
+                        # Frame 0 is the Basis, keyframes start with frame 1
+                        first_vert = frames[0].first_vert
+                        sk_basis = object.shape_key_add(name='Basis', from_mix=False)
+                        sk_basis.interpolation = 'KEY_LINEAR'
+                        object.data.shape_keys.use_relative = True
 
-                if isMaterialTrackKeyframe:
-                    print('Material track!!!')
-                if isVisibilityTrack:
-                    print('Visibility track!!!')
-                if not isFrameTrackKeyframe and not isMaterialTrackKeyframe and not isVisibilityTrack:
-                    print('Transform track!!!')
+                        sks = []
+                        for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
+                            frametrack_key = keyframes[key].key_value
+                            print('frametrack_key: {}'.format(frametrack_key))
+                            print('def origin: {}'.format((frames[0].origin.x, frames[0].origin.y, frames[0].origin.z)))
+                            print('new origin: {}'.format((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z)))
+
+                            # Move and scale the mesh of the object, can't be done as a ShapeKey
+                            default_origin = mathutils.Vector((frames[0].origin.x, frames[0].origin.y, frames[0].origin.z))
+                            new_origin = mathutils.Vector((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z))
+                            #object.location = (frames[frametrack_key].origin.x - frames[0].origin.x, frames[frametrack_key].origin.y - frames[0].origin.y, frames[frametrack_key].origin.z - frames[0].origin.z)
+                            #object.location = new_origin - default_origin
+                            #object.location = mathutils.Vector((frames[frametrack_key].origin.x - frames[0].origin.x, frames[frametrack_key].origin.y - frames[0].origin.y, frames[frametrack_key].origin.z - frames[0].origin.z))
+                            object.location = mathutils.Vector((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z))
+
+                            print('Setting object location new to: {}'.format(object.location))
+                            object.scale = (frames[frametrack_key].scale.x, frames[frametrack_key].scale.y, frames[frametrack_key].scale.z)
+                            object.keyframe_insert(data_path="location", index=-1, frame=frame_id + (key - first_keyframe))
+                            object.keyframe_insert(data_path="scale", index=-1, frame=frame_id + (key - first_keyframe))
+
+                            # Create new shape key
+                            sk = object.shape_key_add(name='Frame {}'.format(frametrack_key), from_mix=False)
+                            sk.interpolation = 'KEY_LINEAR'
+
+                            start_vertex = frames[frametrack_key].first_vert
+                            for vrt_idx in range(mesh.num_vertices_per_frame):
+                                # print('{}, {}, {} -> {}, {}, {}'.format(
+                                #     sk.data[vrt_idx].co.x,
+                                #     sk.data[vrt_idx].co.y,
+                                #     sk.data[vrt_idx].co.z,
+                                #     mesh.vertices[start_vertex + vrt_idx].x,
+                                #     mesh.vertices[start_vertex + vrt_idx].y,
+                                #     mesh.vertices[start_vertex + vrt_idx].z
+                                # ))
+                                print('{}: {}, {}, {}'.format(
+                                    vrt_idx,
+                                    mesh.vertices[start_vertex + vrt_idx].x,
+                                    mesh.vertices[start_vertex + vrt_idx].y,
+                                    mesh.vertices[start_vertex + vrt_idx].z
+                                ))
+
+                                sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
+                                sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
+                                sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
+                            print('=============')
+                            sk.value = 0
+                            sk.keyframe_insert(data_path="value", index=-1)
+                            sks.append(sk)
+
+                        prev_sk = None
+                        for sk_idx in range(len(sks)):
+                            scene.frame_set(frame_id)
+
+                            # Set prev frame back to zero
+                            if prev_sk is not None:
+                                prev_sk.value = 0
+                                prev_sk.keyframe_insert(data_path="value", index=-1)
+
+                            # Set current frame to 1
+                            sks[sk_idx].value = 1
+                            sks[sk_idx].keyframe_insert(data_path="value", index=-1)
+
+                            # Queue up next frame, setting it to zero, so there's no automatic transition to 1
+                            if sk_idx != len(sks) - 1:
+                                sks[sk_idx + 1].value = 0
+                                sks[sk_idx + 1].keyframe_insert(data_path="value", index=-1)
+
+                            prev_sk = sks[sk_idx]
+                            frame_id += 1
+
+                    if isMaterialTrackKeyframe:
+                        print('Material track!!!')
+                    if isVisibilityTrack:
+                        print('Visibility track!!!')
+                    if not isFrameTrackKeyframe and not isMaterialTrackKeyframe and not isVisibilityTrack:
+                        print('Transform track!!!')
 
             def generate_ifl_materials(sequences, keyframes):
                 ifl_materials = {}
@@ -361,6 +397,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             pngORbmp = ""
             node_tree = {}
             obj_dts_to_blender_map = {}
+            scene_sequences = {}    # Map of sequence to frame number
 
 
             if b'TS::Shape' in d.shape.data.classname:
@@ -680,14 +717,17 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 
                 # Set the location and rotation of the object
                 object.location = mathutils.Vector((mesh_data.frames[0].origin.x, mesh_data.frames[0].origin.y, mesh_data.frames[0].origin.z))
+                print('Setting object location to: {}'.format(object.location))
                 object.rotation_mode = 'QUATERNION'
                 #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
                 # Create the mesh of the object
                 mesh.from_pydata(array_verts_all, [], array_faces)
 
-                animate_meshes(mesh_data, obj, names, keyframes, shape_data.sequences, subsequences, bpy.data.scenes['Scene'])
-
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
+
+                animate_meshes(object, mesh_data, obj, names, keyframes, shape_data.sequences, subsequences, bpy.data.scenes['Scene'], scene_sequences)
+
+                #object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
                 ob = bpy.context.scene.objects[actual_object_name]  # Get the object
                 bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
@@ -728,7 +768,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 obj_id += 1
 
             # Blender - Create Objects for all nodes, with dummy meshes, find parents
-            array_parents = []   
+            array_parents = []
             for node in nodes:
                 obj = bpy.context.scene.objects.get(names[node.name])
                 if not obj:
@@ -740,7 +780,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     array_parents.append(array_val)
                     
             # Blender - Find parents for all objects
-            pprint.pp(obj_dts_to_blender_map)
+            # pprint.pp(obj_dts_to_blender_map)
             for obj_id in range(len(objects)):
                 obj = objects[obj_id]
                 # Some objects don't get created in Blender (e.g. bounds)
@@ -749,7 +789,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 array_val = [obj_dts_to_blender_map[obj_id], names[nodes[obj.node_index].name]]
                 array_parents.append(array_val)
-                print(obj_id, obj_dts_to_blender_map[obj_id], obj.node_index, names[nodes[obj.node_index].name])
+                print('obj id: {}, blend: {}, obj node idx: {}, node name: {}'.format(obj_id, obj_dts_to_blender_map[obj_id], obj.node_index, names[nodes[obj.node_index].name]))
                         
             # Blender - Parent all the objects
             x = 0
@@ -763,12 +803,12 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 x += 1
                     
             # Blender - Move the nodes
-            for node in nodes:
-                def_trans = transforms[nodes[node.id].default_transform]
-                object = bpy.context.scene.objects[names[nodes[node.id].name]]
-                object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
-                #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-                object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
+            # for node in nodes:
+            #     def_trans = transforms[nodes[node.id].default_transform]
+            #     object = bpy.context.scene.objects[names[nodes[node.id].name]]
+            #     object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
+            #     #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
+            #     object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
             
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
@@ -818,7 +858,13 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
                 seq_name = names[sequence.name]
                 print(seq_name)
-                scene.timeline_markers.new(seq_name, frame=frame_id)
+
+                if seq_name not in scene_sequences:
+                    print('Sequence not seen. Setting "{}" to frame {}'.format(seq_name, frame_id))
+                    scene.timeline_markers.new(seq_name, frame=frame_id)
+                    scene_sequences[seq_name] = frame_id
+                else:
+                    frame_id = scene_sequences[seq_name]
 
                 if sequence.num_ifl_subsequences > 0:
                     # IFL sequence
@@ -874,6 +920,5 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                         node_id += 1
                     frame_id += last_subseq_len
-                scene.timeline_markers.new('End of {}'.format(seq_name), frame=frame_id)
                     
         return {'FINISHED'}
