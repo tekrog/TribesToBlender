@@ -124,7 +124,42 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     create_nodes(nodes[child], nodes, transforms, node_tree)
 
 
-            def animate_meshes(object, mesh, obj, names, keyframes, sequences, subsequences, scene, scene_sequences):
+            def reset_all_meshes_framed(frame_id, objects, meshes, names, frames):
+                if frame_id == 0:
+                    return
+
+                obj_id = 0
+                for obj in objects:
+                    mesh = meshes[obj_id]
+                    print(names[obj.name])
+                    object = bpy.context.scene.objects[names[obj.name]]
+                    print(object)
+                    if object.data:
+                        sks = object.data.shape_keys
+                        if sks:
+                            if sks.key_blocks.find('Frame {}'.format(frame_id)) == -1:
+                                last_sk = sks.key_blocks[len(sks.key_blocks) - 1]
+                                last_sk.value = 0
+                                last_sk.keyframe_insert(data_path="value", index=-1, frame=frame_id)
+
+                                sk = object.shape_key_add(name='Frame {}'.format(frame_id), from_mix=False)
+                                sk.interpolation = 'KEY_LINEAR'
+                                sk.value = 1
+                                start_vertex = frames[0].first_vert
+                                for vrt_idx in range(mesh.num_vertices_per_frame):
+                                    sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
+                                    sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
+                                    sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
+                                sk.keyframe_insert(data_path="value", index=-1, frame=frame_id)
+
+                                sk.value = 0
+                                sk.keyframe_insert(data_path="value", index=-1, frame=0)
+
+                                object.scale = (frames[0].scale.x, frames[0].scale.y, frames[0].scale.z)
+                                object.keyframe_insert(data_path="scale", index=-1, frame=frame_id)
+                    obj_id += 1
+
+            def animate_meshes(mesh, obj, names, keyframes, sequences, subsequences, scene, scene_sequences):
                 global frame_id
 
                 if not obj.num_subsequences:
@@ -160,17 +195,11 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                     isMaterialTrackKeyframe = keyframes[first_keyframe].mat_index & FLAG_MATERIAL_TRACK
                     isVisibilityTrack = keyframes[first_keyframe].mat_index & FLAG_VISIBILITY_TRACK
 
-                    #object = bpy.context.scene.objects[names[obj.name]]
+                    object = bpy.context.scene.objects[names[obj.name]]
                     if isFrameTrackKeyframe:
                         print('Frame track!!!')
 
-                        # Dummy frame
-                        # object.keyframe_insert(data_path="location", index=-1, frame=frame_id)
-                        # frame_id += 1
-                        # scene.frame_set(frame_id)
-
                         # Frame 0 is the Basis, keyframes start with frame 1
-                        first_vert = frames[0].first_vert
                         sk_basis = object.shape_key_add(name='Basis', from_mix=False)
                         sk_basis.interpolation = 'KEY_LINEAR'
                         object.data.shape_keys.use_relative = True
@@ -178,19 +207,9 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                         sks = []
                         for key in range(first_keyframe, first_keyframe + subseq.num_keyframes):
                             frametrack_key = keyframes[key].key_value
-                            print('frametrack_key: {}'.format(frametrack_key))
-                            print('def origin: {}'.format((frames[0].origin.x, frames[0].origin.y, frames[0].origin.z)))
-                            print('new origin: {}'.format((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z)))
 
                             # Move and scale the mesh of the object, can't be done as a ShapeKey
-                            default_origin = mathutils.Vector((frames[0].origin.x, frames[0].origin.y, frames[0].origin.z))
-                            new_origin = mathutils.Vector((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z))
-                            #object.location = (frames[frametrack_key].origin.x - frames[0].origin.x, frames[frametrack_key].origin.y - frames[0].origin.y, frames[frametrack_key].origin.z - frames[0].origin.z)
-                            #object.location = new_origin - default_origin
-                            #object.location = mathutils.Vector((frames[frametrack_key].origin.x - frames[0].origin.x, frames[frametrack_key].origin.y - frames[0].origin.y, frames[frametrack_key].origin.z - frames[0].origin.z))
                             object.location = mathutils.Vector((frames[frametrack_key].origin.x, frames[frametrack_key].origin.y, frames[frametrack_key].origin.z))
-
-                            print('Setting object location new to: {}'.format(object.location))
                             object.scale = (frames[frametrack_key].scale.x, frames[frametrack_key].scale.y, frames[frametrack_key].scale.z)
                             object.keyframe_insert(data_path="location", index=-1, frame=frame_id + (key - first_keyframe))
                             object.keyframe_insert(data_path="scale", index=-1, frame=frame_id + (key - first_keyframe))
@@ -201,28 +220,14 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                             start_vertex = frames[frametrack_key].first_vert
                             for vrt_idx in range(mesh.num_vertices_per_frame):
-                                # print('{}, {}, {} -> {}, {}, {}'.format(
-                                #     sk.data[vrt_idx].co.x,
-                                #     sk.data[vrt_idx].co.y,
-                                #     sk.data[vrt_idx].co.z,
-                                #     mesh.vertices[start_vertex + vrt_idx].x,
-                                #     mesh.vertices[start_vertex + vrt_idx].y,
-                                #     mesh.vertices[start_vertex + vrt_idx].z
-                                # ))
-                                print('{}: {}, {}, {}'.format(
-                                    vrt_idx,
-                                    mesh.vertices[start_vertex + vrt_idx].x,
-                                    mesh.vertices[start_vertex + vrt_idx].y,
-                                    mesh.vertices[start_vertex + vrt_idx].z
-                                ))
-
                                 sk.data[vrt_idx].co.x = mesh.vertices[start_vertex + vrt_idx].x
                                 sk.data[vrt_idx].co.y = mesh.vertices[start_vertex + vrt_idx].y
                                 sk.data[vrt_idx].co.z = mesh.vertices[start_vertex + vrt_idx].z
-                            print('=============')
+
                             sk.value = 0
                             sk.keyframe_insert(data_path="value", index=-1)
                             sks.append(sk)
+
 
                         prev_sk = None
                         for sk_idx in range(len(sks)):
@@ -725,9 +730,7 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
 
                 object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
 
-                animate_meshes(object, mesh_data, obj, names, keyframes, shape_data.sequences, subsequences, bpy.data.scenes['Scene'], scene_sequences)
 
-                #object.scale = (mesh_data.frames[0].scale.x, mesh_data.frames[0].scale.y, mesh_data.frames[0].scale.z)
                 # Select object by name
                 ob = bpy.context.scene.objects[actual_object_name]  # Get the object
                 bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
@@ -802,14 +805,6 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
                 bpy.ops.object.parent_set(type='OBJECT')
                 x += 1
                     
-            # Blender - Move the nodes
-            # for node in nodes:
-            #     def_trans = transforms[nodes[node.id].default_transform]
-            #     object = bpy.context.scene.objects[names[nodes[node.id].name]]
-            #     object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
-            #     #object.rotation_quaternion = [short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z), short2float(def_trans.rotate.w)]
-            #     object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
-            
             shape_data: Dts.TsShape = d.shape.data.obj_data
             # Create a panel to hold sequences
             store("""
@@ -843,16 +838,24 @@ class ImportDTS(bpy.types.Operator, ImportHelper):
             # Create the sequences
             scene = bpy.data.scenes['Scene']
 
+            obj_id = 0
+            for mesh_data in d.meshes:
+                obj = objects[obj_id]
+                animate_meshes(mesh_data, obj, names, keyframes, shape_data.sequences, subsequences, bpy.data.scenes['Scene'], scene_sequences)
+                obj_id += 1
+
             # Iterate through all sequences and generate key frames for each object participating in that sequence
             for seq_id in range(len(shape_data.sequences)):
                 # Before starting a sequence, reset all nodes to their default transform
                 for node in nodes:
                     def_trans = transforms[nodes[node.id].default_transform]
                     object = bpy.context.scene.objects[names[nodes[node.id].name]]
+                    #reset_all_meshes_framed(frame_id, objects, d.meshes, names, frames)
                     object.location = [def_trans.translate.x, def_trans.translate.y, def_trans.translate.z]
                     object.rotation_quaternion = [short2float(def_trans.rotate.w) * -1, short2float(def_trans.rotate.x), short2float(def_trans.rotate.y), short2float(def_trans.rotate.z)]
                     object.keyframe_insert(data_path="rotation_quaternion", index=-1)
                     object.keyframe_insert(data_path="location", index=-1)
+
                 frame_id += 1
 
                 sequence: Dts.VectorSequence = shape_data.sequences[seq_id]
