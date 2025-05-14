@@ -15,8 +15,7 @@ The following model features are supported:
 * Static meshes
 * Collision meshes
 * Debris meshes
-* Animated meshes / vertex animations (like the Camera and deployable sensor)
-  * Some meshes have issues, like the Sensor Jammer
+* Hulk meshes
 * Levels of Detail (LODs)(Each level will have a number after the name of the root mesh)
 * Textures
   * If the texture files are in the same directory as the .dts file, they will be automatically imported and applied to the model
@@ -37,6 +36,8 @@ Below are the currently known issues:
 
 # Wishlist
 Items we would like to add to the add-on.
+* Animated meshes / vertex animations (like the Camera and deployable sensor)
+  * There is an "animated-scaling" branch that is adding support for this, but there is an issue with the animation origin.
 * Change animation markers to use actions instead.
 * Auto-create bones and move animations to bones.
 * Add support for animated UVs.
