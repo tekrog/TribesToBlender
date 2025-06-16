@@ -25,7 +25,7 @@
 bl_info = {
     "name" : "Import-DTS",
     "author" : "Noxwizard and Krogoth",
-    "description" : "Imports Starsiege: Tribes DTS files.",
+    "description" : "Imports Starsiege: Tribes files",
     "blender" : (3, 0, 0),
     "version" : (0, 0, 1),
     "location" : "File > Import-Export",
@@ -36,15 +36,43 @@ bl_info = {
 }
 
 import bpy
-from .main import ImportDTS
+import os
+from .DTSImporter import load_dts
+from .DISImporter import load_dis
+from .TEDImporter import load_ted
+
+from bpy_extras.io_utils import ImportHelper
+from bpy.props import StringProperty, FloatProperty
+
+class DarkstarImporter(bpy.types.Operator, ImportHelper):
+    bl_idname = "dynamix.dts"
+    bl_label = "Import Starsiege: Tribes shapes"
+    bl_description = 'Imports Starsiege: Tribes shapes'
+
+    filter_glob : StringProperty(default="*.dis;*.dts;*.ted", options={'HIDDEN'})
+
+    def execute(self, context):
+        extension = os.path.splitext(self.filepath)[1].lower()
+        directory = os.path.dirname(self.filepath)
+        path = self.filepath
+
+        if extension == '.dis':
+            load_dis(os.path.basename(path), directory, directory)
+        elif extension == '.dts':
+            load_dts(self.filepath, context)
+        elif extension == '.ted':
+            load_ted(self.filepath)
+
+        return {'FINISHED'}
+
 
 def menu_func_import(self, context):
-    self.layout.operator(ImportDTS.bl_idname, text="DarkStar (.dts)")
+    self.layout.operator(DarkstarImporter.bl_idname, text="Darkstar Shapes (.dis, .dts, .ted)")
 
 def register():
-    bpy.utils.register_class(ImportDTS)
+    bpy.utils.register_class(DarkstarImporter)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 def unregister():
-    bpy.utils.unregister_class(ImportDTS)
+    bpy.utils.unregister_class(DarkstarImporter)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)

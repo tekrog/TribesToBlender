@@ -11,6 +11,7 @@ Once installed, go to File > Import and DarkStar (.dts) is now an option.
 
 # Supported Features
 The following model features are supported:
+## DTS Shapes
 * Animations
 * Static meshes
 * Collision meshes
@@ -25,14 +26,27 @@ The following model features are supported:
   * Some of the animations slide, this is most likely a keyframing issue
 * Vehicles
 
+## DIS Shapes
+* Shape import
+
+## Terrain
+* Parsing
+
 # Known Issues
 Below are the currently known issues:
+## DTS Shapes
 * Sub-animations do not work (flames on the vehicles)
 * Some of the armor animations slide, an additional keyframe most likely needs to be inserted before transitioning between animations
 * Not all of the vertex animations work properly (Sensor Jammer)
 * Animated UVs are not supported.
 * Importing multiple models at the same can break the hierarchy and overlap the timeline markers.
   * Don't import more than one model at a time into a scene.
+
+## DIS Shapes
+* Textures are not correctly applied
+
+## Terrain
+* Not yet imported as an object
 
 # Wishlist
 Items we would like to add to the add-on.
