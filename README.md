@@ -3,7 +3,7 @@ Import Starsiege: Tribes models into Blender 3.0+
 
 Currently, .DTS and .DIS files are supported for import, these are the static and animated meshes and BSP meshes used by Tribes.
 
-.DIS model support added courtesy of [Jobo's Tribes-OBJ-to-DIS-Converter](https://github.com/jcmolnar/Tribes-OBJ-to-DIS-Converter).
+.DIS model support added courtesy of [Jobo's DIS to OBJ converter](https://github.com/jcmolnar/Tribes-DIS-to-OBJ).
 
 # Installation
 In GitHub go to Code > Download as .zip
